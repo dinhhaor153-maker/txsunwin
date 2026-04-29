@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sun.win AI Dự Đoán</title>
+<style>
+:root {
+  --bg: #060612;
+  --card: #0d0d20;
+  --border: #1e1e3a;
+  --purple: #8b5cf6;
+  --purple-dim: #4c1d95;
+  --tai: #f97316;
+  --xiu: #3b82f6;
+  --green: #22c55e;
+  --red: #ef4444;
+  --text: #e2e8f0;
+  --muted: #64748b;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; min-height:100vh; }
+
+/* HEADER */
+.header { background:linear-gradient(135deg,#0f0f2e,#1a0a3e); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; }
+.header-title { font-size:1.1rem; font-weight:700; color:var(--purple); }
+.header-status { display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--muted); }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--green); }
+.dot.offline { background:var(--red); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.dot.live { animation:blink 1.5s infinite; }
+
+/* LAYOUT */
+.container { max-width:960px; margin:0 auto; padding:16px; }
+
+/* MAIN PREDICTION */
+.pred-main { background:linear-gradient(135deg,#0d0d20,#130a2e); border:1px solid var(--purple-dim); border-radius:16px; padding:24px; text-align:center; margin-bottom:16px; position:relative; overflow:hidden; }
+.pred-main::before { content:''; position:absolute; top:-50%; left:-50%; width:200%; height:200%; background:radial-gradient(circle,rgba(139,92,246,0.05) 0%,transparent 60%); pointer-events:none; }
+.pred-phien { font-size:0.8rem; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:8px; }
+.pred-result { font-size:5rem; font-weight:900; line-height:1; margin:8px 0; letter-spacing:3px; transition:all 0.3s; }
+.pred-result.tai { color:var(--tai); text-shadow:0 0 30px rgba(249,115,22,0.5); }
+.pred-result.xiu { color:var(--xiu); text-shadow:0 0 30px rgba(59,130,246,0.5); }
+.pred-result.wait { color:var(--muted); font-size:3rem; }
+.pred-conf { display:inline-block; background:rgba(139,92,246,0.15); border:1px solid var(--purple-dim); border-radius:20px; padding:4px 18px; font-size:1.1rem; color:var(--purple); font-weight:600; margin:8px 0; }
+.pred-desc { font-size:0.8rem; color:var(--muted); margin-top:4px; }
+.pred-votes { display:flex; gap:10px; margin-top:16px; }
+.vote-box { flex:1; background:rgba(255,255,255,0.03); border-radius:10px; padding:10px; text-align:center; }
+.vote-box.tai-box { border:1px solid rgba(249,115,22,0.3); }
+.vote-box.xiu-box { border:1px solid rgba(59,130,246,0.3); }
+.vote-num { font-size:1.6rem; font-weight:800; }
+.vote-box.tai-box .vote-num { color:var(--tai); }
+.vote-box.xiu-box .vote-num { color:var(--xiu); }
+.vote-label { font-size:0.7rem; color:var(--muted); margin-top:2px; }
+
+/* GRID */
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px; }
+@media(max-width:640px) { .grid2,.grid3 { grid-template-columns:1fr; } }
+
+/* CARD */
+.card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
+.card-label { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+
+/* RISK CARD */
+.risk-card { border-radius:12px; padding:16px; }
+.risk-safe { background:#0a1f0a; border:1px solid #166534; }
+.risk-low_warning { background:#1a1500; border:1px solid #854d0e; }
+.risk-medium { background:#1a0f00; border:1px solid #c2410c; }
+.risk-high { background:#1a0505; border:1px solid #991b1b; }
+.risk-critical { background:#1a0000; border:1px solid #7f1d1d; animation:blink 1s infinite; }
+.risk-level { font-size:1.2rem; font-weight:800; }
+.risk-safe .risk-level { color:var(--green); }
+.risk-low_warning .risk-level { color:#fbbf24; }
+.risk-medium .risk-level { color:#fb923c; }
+.risk-high .risk-level, .risk-critical .risk-level { color:var(--red); }
+.risk-prob { font-size:2.5rem; font-weight:900; margin:4px 0; }
+.risk-safe .risk-prob { color:var(--green); }
+.risk-low_warning .risk-prob { color:#fbbf24; }
+.risk-medium .risk-prob { color:#fb923c; }
+.risk-high .risk-prob, .risk-critical .risk-prob { color:var(--red); }
+.risk-rec { font-size:0.8rem; color:var(--muted); margin-top:4px; }
+.risk-signals { margin-top:8px; }
+.risk-signal-item { font-size:0.72rem; color:var(--muted); padding:2px 0; }
+
+/* STATS */
+.stat-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--border); }
+.stat-row:last-child { border-bottom:none; }
+.stat-label { font-size:0.8rem; color:var(--muted); }
+.stat-val { font-size:0.9rem; font-weight:600; }
+
+/* PATTERNS */
+.pattern-item { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:rgba(255,255,255,0.02); border-radius:8px; margin-bottom:6px; border:1px solid var(--border); }
+.pattern-name { font-size:0.75rem; color:var(--muted); }
+.pattern-desc { font-size:0.7rem; color:#475569; margin-top:1px; }
+.pattern-right { text-align:right; }
+.pattern-pred { font-size:0.85rem; font-weight:700; }
+.pattern-pred.tai { color:var(--tai); }
+.pattern-pred.xiu { color:var(--xiu); }
+.pattern-conf { font-size:0.7rem; color:var(--purple); }
+
+/* HISTORY TABLE */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:0.78rem; }
+th { background:rgba(255,255,255,0.03); color:var(--muted); padding:8px 10px; text-align:center; font-weight:500; border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:7px 10px; text-align:center; border-bottom:1px solid rgba(30,30,58,0.5); }
+tr:hover td { background:rgba(139,92,246,0.04); }
+.badge { display:inline-block; padding:2px 8px; border-radius:6px; font-weight:600; font-size:0.72rem; }
+.badge-tai { background:rgba(249,115,22,0.15); color:var(--tai); }
+.badge-xiu { background:rgba(59,130,246,0.15); color:var(--xiu); }
+.badge-dung { background:rgba(34,197,94,0.15); color:var(--green); }
+.badge-sai { background:rgba(239,68,68,0.15); color:var(--red); }
+.badge-wait { background:rgba(100,116,139,0.15); color:var(--muted); }
+
+/* SCROLL */
+.scroll-box { max-height:300px; overflow-y:auto; }
+.scroll-box::-webkit-scrollbar { width:3px; }
+.scroll-box::-webkit-scrollbar-track { background:transparent; }
+.scroll-box::-webkit-scrollbar-thumb { background:var(--purple-dim); border-radius:2px; }
+
+/* HOUSE */
+.house-detected { color:var(--red); font-weight:700; margin-bottom:8px; }
+.house-ok { color:var(--green); }
+
+/* COUNTDOWN */
+.countdown { font-size:0.72rem; color:var(--muted); margin-top:8px; }
+
+/* FULL WIDTH */
+.full { grid-column:1/-1; }
+
+/* TABS */
+.tabs { display:flex; gap:4px; margin-bottom:12px; }
+.tab { padding:6px 14px; border-radius:8px; font-size:0.78rem; cursor:pointer; border:1px solid var(--border); color:var(--muted); background:transparent; transition:all 0.2s; }
+.tab.active { background:var(--purple-dim); border-color:var(--purple); color:white; }
+.tab-content { display:none; }
+.tab-content.active { display:block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">🎲 Sun.win AI</div>
+  <div class="header-status">
+    <div class="dot live" id="dot"></div>
+    <span id="status-text">Đang kết nối...</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- MAIN PREDICTION -->
+  <div class="pred-main">
+    <div class="pred-phien">Dự đoán phiên <span id="pred-phien">---</span></div>
+    <div class="pred-result wait" id="pred-result">⏳</div>
+    <div class="pred-conf" id="pred-conf">--%</div>
+    <div class="pred-desc" id="pred-desc">Đang phân tích...</div>
+    <div class="countdown" id="countdown"></div>
+    <div class="pred-votes">
+      <div class="vote-box tai-box">
+        <div class="vote-num" id="tai-votes">0</div>
+        <div class="vote-label">Tài votes</div>
+      </div>
+      <div class="vote-box xiu-box">
+        <div class="vote-num" id="xiu-votes">0</div>
+        <div class="vote-label">Xỉu votes</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 1 -->
+  <div class="grid2">
+    <!-- RISK -->
+    <div class="risk-card risk-safe" id="risk-card">
+      <div class="card-label">⚠️ Phát Hiện Bẻ Cầu</div>
+      <div class="risk-level" id="risk-level">SAFE</div>
+      <div class="risk-prob" id="risk-prob">0%</div>
+      <div class="risk-rec" id="risk-rec">Đang phân tích...</div>
+      <div class="risk-signals" id="risk-signals"></div>
+    </div>
+
+    <!-- STATS -->
+    <div class="card">
+      <div class="card-label">📊 Thống Kê</div>
+      <div class="stat-row"><span class="stat-label">Tổng dự đoán</span><span class="stat-val" id="s-total">0</span></div>
+      <div class="stat-row"><span class="stat-label">Đúng</span><span class="stat-val" style="color:var(--green)" id="s-correct">0</span></div>
+      <div class="stat-row"><span class="stat-label">Sai</span><span class="stat-val" style="color:var(--red)" id="s-wrong">0</span></div>
+      <div class="stat-row"><span class="stat-label">Tỷ lệ đúng</span><span class="stat-val" style="color:var(--purple)" id="s-rate">0%</span></div>
+      <div class="stat-row"><span class="stat-label">20 phiên Tài</span><span class="stat-val" style="color:var(--tai)" id="s-tai">0</span></div>
+      <div class="stat-row"><span class="stat-label">20 phiên Xỉu</span><span class="stat-val" style="color:var(--xiu)" id="s-xiu">0</span></div>
+    </div>
+  </div>
+
+  <!-- ROW 2 -->
+  <div class="grid2">
+    <!-- TOP PATTERNS -->
+    <div class="card">
+      <div class="card-label">🔍 Patterns Phát Hiện</div>
+      <div id="pattern-list"><div style="color:var(--muted);font-size:0.8rem">Đang phân tích...</div></div>
+    </div>
+
+    <!-- HOUSE INTERVENTION -->
+    <div class="card">
+      <div class="card-label">🤖 AI Phát Hiện Nhà Cái</div>
+      <div id="house-content" style="color:var(--muted);font-size:0.85rem">Đang theo dõi...</div>
+    </div>
+  </div>
+
+  <!-- TABS: HISTORY -->
+  <div class="card full">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('pred')">📋 Lịch Sử Dự Đoán</button>
+      <button class="tab" onclick="switchTab('game')">🎲 Kết Quả Thực</button>
+    </div>
+
+    <div class="tab-content active" id="tab-pred">
+      <div class="scroll-box">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Phiên</th><th>Dự đoán</th><th>Tỷ lệ</th><th>Thuật toán</th><th>Xúc xắc</th><th>Tổng</th><th>Thực tế</th><th>Kết quả</th></tr></thead>
+            <tbody id="pred-tbody"><tr><td colspan="8" style="color:var(--muted);padding:20px">Đang tải...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-game">
+      <div class="scroll-box">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Phiên</th><th>🎲1</th><th>🎲2</th><th>🎲3</th><th>Tổng</th><th>Kết quả</th></tr></thead>
+            <tbody id="game-tbody"><tr><td colspan="6" style="color:var(--muted);padding:20px">Đang tải...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = 'https://lc79-server-production.up.railway.app';
+let cd = 8;
+let cdTimer = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (name==='pred'&&i===0)||(name==='game'&&i===1)));
+  document.getElementById('tab-pred').classList.toggle('active', name==='pred');
+  document.getElementById('tab-game').classList.toggle('active', name==='game');
+}
+
+function riskClass(risk) {
+  return 'risk-card risk-' + (risk||'safe');
+}
+
+function renderPred(d) {
+  if (!d || d.du_doan === 'dang_doi') return;
+  document.getElementById('pred-phien').textContent = '#' + d.phien;
+  const el = document.getElementById('pred-result');
+  el.textContent = d.du_doan;
+  el.className = 'pred-result ' + (d.du_doan==='Tài'?'tai':d.du_doan==='Xỉu'?'xiu':'wait');
+  document.getElementById('pred-conf').textContent = d.ti_le || d.ti_le_thang || '--%';
+  document.getElementById('pred-desc').textContent = d.mo_ta || d.thuat_toan || '';
+  document.getElementById('tai-votes').textContent = d.tai_votes || 0;
+  document.getElementById('xiu-votes').textContent = d.xiu_votes || 0;
+
+  if (d.break_detection) {
+    const b = d.break_detection;
+    const rc = document.getElementById('risk-card');
+    rc.className = riskClass(b.risk_level);
+    document.getElementById('risk-level').textContent = (b.risk_level||'safe').toUpperCase().replace('_',' ');
+    document.getElementById('risk-prob').textContent = b.break_probability;
+    document.getElementById('risk-rec').textContent = b.recommendation;
+    document.getElementById('risk-signals').innerHTML = (b.signals||[]).map(s=>`<div class="risk-signal-item">${s}</div>`).join('');
+  }
+
+  if (d.top_patterns && d.top_patterns.length) {
+    document.getElementById('pattern-list').innerHTML = d.top_patterns.map(p=>`
+      <div class="pattern-item">
+        <div><div class="pattern-name">${p.pattern}</div><div class="pattern-desc">${p.description||''}</div></div>
+        <div class="pattern-right">
+          <div class="pattern-pred ${p.prediction==='Tài'?'tai':'xiu'}">${p.prediction}</div>
+          <div class="pattern-conf">${p.confidence}</div>
+        </div>
+      </div>`).join('');
+  }
+
+  if (d.house_intervention) {
+    const h = d.house_intervention;
+    const hc = document.getElementById('house-content');
+    if (h.detected) {
+      hc.innerHTML = `<div class="house-detected">🚨 PHÁT HIỆN CAN THIỆP (${h.confidence})</div>` +
+        (h.signals||[]).map(s=>`<div style="font-size:0.75rem;color:var(--muted);margin-top:3px">• ${s}</div>`).join('');
+    } else {
+      hc.innerHTML = `<div class="house-ok">✅ Không phát hiện can thiệp bất thường</div>`;
+    }
+  }
+}
+
+function renderStats(d) {
+  if (!d) return;
+  const ps = d.predictionStats || d.accuracy || {};
+  const l20 = d.last20Sessions || d.last20 || {};
+  document.getElementById('s-total').textContent = ps.total || 0;
+  document.getElementById('s-correct').textContent = ps.correct || 0;
+  document.getElementById('s-wrong').textContent = ps.wrong || 0;
+  document.getElementById('s-rate').textContent = ps.accuracy || ps.rate || '0%';
+  document.getElementById('s-tai').textContent = l20.tai || 0;
+  document.getElementById('s-xiu').textContent = l20.xiu || 0;
+}
+
+function renderPredHistory(list) {
+  const tb = document.getElementById('pred-tbody');
+  if (!list || !list.length) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:16px">Chưa có dữ liệu</td></tr>'; return; }
+  tb.innerHTML = list.slice(0,60).map(p => {
+    const kq = p.kq || p.kq_du_doan;
+    const kqBadge = kq==='dung'?'badge-dung':kq==='sai'?'badge-sai':'badge-wait';
+    const kqText = kq==='dung'?'✅ Đúng':kq==='sai'?'❌ Sai':'⏳';
+    const pred = p.du_doan;
+    const xucxac = (p.xuc_xac && p.xuc_xac!=='---') ? p.xuc_xac : (p.xuc_xac_1&&p.xuc_xac_1!=='dang_doi'?`${p.xuc_xac_1}-${p.xuc_xac_2}-${p.xuc_xac_3}`:'---');
+    const tong = p.tong && p.tong!=='---' && p.tong!=='dang_doi' ? p.tong : '---';
+    const ketqua = p.ket_qua && p.ket_qua!=='---' && p.ket_qua!=='dang_doi' ? `<span class="badge badge-${p.ket_qua==='Tài'?'tai':'xiu'}">${p.ket_qua}</span>` : '---';
+    return `<tr>
+      <td style="color:var(--purple)">#${p.phien}</td>
+      <td><span class="badge badge-${pred==='Tài'?'tai':'xiu'}">${pred}</span></td>
+      <td style="color:var(--purple)">${p.ti_le||p.ti_le_thang||''}</td>
+      <td style="color:var(--muted);font-size:0.7rem">${p.thuat_toan||''}</td>
+      <td style="color:var(--muted)">${xucxac}</td>
+      <td>${tong}</td>
+      <td>${ketqua}</td>
+      <td><span class="badge ${kqBadge}">${kqText}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderGameHistory(list) {
+  const tb = document.getElementById('game-tbody');
+  if (!list || !list.length) { tb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:16px">Chưa có dữ liệu</td></tr>'; return; }
+  tb.innerHTML = list.slice(0,60).map(h => `<tr>
+    <td style="color:var(--purple)">#${h.Phien||h.phien}</td>
+    <td>${h.Xuc_xac_1||h.xuc_xac_1}</td>
+    <td>${h.Xuc_xac_2||h.xuc_xac_2}</td>
+    <td>${h.Xuc_xac_3||h.xuc_xac_3}</td>
+    <td>${h.Tong||h.tong}</td>
+    <td><span class="badge badge-${(h.Ket_qua||h.ket_qua)==='Tài'?'tai':'xiu'}">${h.Ket_qua||h.ket_qua}</span></td>
+  </tr>`).join('');
+}
+
+async function refresh() {
+  try {
+    const [pred, stats, predH, gameH] = await Promise.all([
+      fetch(API+'/api/sunwin/prediction').then(r=>r.json()).catch(()=>null),
+      fetch(API+'/api/stats').then(r=>r.json()).catch(()=>null),
+      fetch(API+'/api/prediction-history').then(r=>r.json()).catch(()=>null),
+      fetch(API+'/api/lichsu').then(r=>r.json()).catch(()=>null)
+    ]);
+    document.getElementById('dot').className = 'dot live';
+    document.getElementById('status-text').textContent = 'Live · ' + new Date().toLocaleTimeString('vi-VN');
+    renderPred(pred);
+    renderStats(stats);
+    renderPredHistory(predH);
+    renderGameHistory(gameH);
+  } catch(e) {
+    document.getElementById('dot').className = 'dot offline';
+    document.getElementById('status-text').textContent = 'Mất kết nối';
+  }
+}
+
+function startCountdown() {
+  cd = 8;
+  clearInterval(cdTimer);
+  cdTimer = setInterval(() => {
+    cd--;
+    document.getElementById('countdown').textContent = `Cập nhật sau ${cd}s`;
+    if (cd <= 0) { refresh(); cd = 8; }
+  }, 1000);
+}
+
+refresh();
+startCountdown();
+</script>
+</body>
+</html>
