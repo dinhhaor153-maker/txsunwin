@@ -101,24 +101,35 @@ function updateRecentPreds(pred, actual) {
 }
 
 function getCutLossOverride(normalPred) {
-  // Neu sai lien tiep >= 2 lan cung huong (cung du doan 1 loai ma sai)
-  // thi dao nguoc lai
   if (recentPreds.length < 2) return null;
+
+  // Check 2 phien: sai lien tiep cung du doan 1 loai => dao
   const last2 = recentPreds.slice(0, 2);
-  const allWrong = last2.every(p => !p.correct);
-  const samePred = last2.every(p => p.pred === last2[0].pred);
-  if (allWrong && samePred) {
+  const allWrong2 = last2.every(p => !p.correct);
+  const samePred2 = last2.every(p => p.pred === last2[0].pred);
+  if (allWrong2 && samePred2) {
     const wrongPred = last2[0].pred;
     const override = wrongPred === 'Tai' ? 'Xiu' : 'Tai';
-    return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
-      ly_giai: `Sai lien tiep 2 lan du doan ${wrongPred} => dao sang ${override}` };
+    // Chi cut-loss neu normalPred cung la wrongPred (tranh cut-loss khi algo da tu dao)
+    if (!normalPred || normalPred === wrongPred) {
+      return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
+        ly_giai: `Sai lien tiep 2 lan du doan ${wrongPred} => dao sang ${override}` };
+    }
   }
+
+  // Check 3 phien: sai lien tiep 3 lan bat ke du doan gi => dao phien sai gan nhat
+  if (recentPreds.length >= 3) {
+    const last3 = recentPreds.slice(0, 3);
+    if (last3.every(p => !p.correct)) {
+      const lastWrongPred = last3[0].pred;
+      const override = lastWrongPred === 'Tai' ? 'Xiu' : 'Tai';
+      return { pred: override, algo: 'CutLoss-3->Dao', conf: 70,
+        ly_giai: `Sai lien tiep 3 lan => dao sang ${override} bat ke pattern` };
+    }
+  }
+
   return null;
 }
-
-// ============================================================
-// PREDICTION ENGINE
-// ============================================================
 function keyOf(arr) {
   return "['" + arr.join("','") + "']";
 }
@@ -168,8 +179,17 @@ function runPredict(w) {
     action_table5: T5[k5] || null
   };
 
-  // ── ƯUTIEN 1: Cut-loss — sai lien tiep 2 lan cung huong ──
-  const cutLoss = getCutLossOverride(null);
+  // ── ƯUTIEN 1: Cut-loss — sai lien tiep 2-3 lan ──
+  // Tinh normalPred truoc de truyen vao getCutLossOverride
+  let normalPred = null;
+  if (T7[k7]) normalPred = T7[k7] === 'BET' ? last : anti;
+  else if (T5[k5]) normalPred = T5[k5] === 'BET' ? last : anti;
+  else if (s >= 6) normalPred = last;
+  else if (s >= 5) normalPred = anti;
+  else if (s === 4) normalPred = anti;
+  else normalPred = anti; // mac dinh
+
+  const cutLoss = getCutLossOverride(normalPred);
   if (cutLoss) {
     return { ...cutLoss, detail };
   }
@@ -295,8 +315,7 @@ function connectWebSocket() {
                 const actual = missed.Ket_qua;
                 const correct = pred.pred === actual;
                 updateRecentPreds(pred.pred, actual);
-                if (!predLog.some(p => p.phien === missed.Phien)) {
-                  predLog.unshift({
+                if (!predLog.some(p => p.phien === missed.Phien)) {                  predLog.unshift({
                     phien: missed.Phien,
                     du_doan: pred.pred,
                     ket_qua: actual,
@@ -330,6 +349,8 @@ function connectWebSocket() {
               if (!pred) continue;
               const actual = sorted[i].Ket_qua;
               const correct = pred.pred === actual;
+              // Cap nhat recentPreds trong backfill de CutLoss hoat dong
+              updateRecentPreds(pred.pred, actual);
               predLog.push({
                 phien: sorted[i].Phien,
                 du_doan: pred.pred,
