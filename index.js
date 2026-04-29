@@ -93,23 +93,33 @@ const T5 = {
 // ============================================================
 // RECENT PREDICTION MEMORY (de cut-loss)
 // ============================================================
-let recentPreds = []; // [{pred, actual, correct}] — toi da 10 phien gan nhat
-
-function updateRecentPreds(pred, actual) {
-  recentPreds.unshift({ pred, actual, correct: pred === actual });
+let recentPreds = []; // [{pred, actual, correct, isCutLoss}]
+let cutLossCooldown = 0; // cooldown sau khi CutLoss sai
+function updateRecentPreds(pred, actual, isCutLoss) {
+  const correct = pred === actual;
+  recentPreds.unshift({ pred, actual, correct, isCutLoss: !!isCutLoss });
   if (recentPreds.length > 10) recentPreds = recentPreds.slice(0, 10);
+  // Neu CutLoss vua sai => dat cooldown 1 phien (tranh oscillation)
+  if (isCutLoss && !correct) {
+    cutLossCooldown = 1;
+  } else if (cutLossCooldown > 0) {
+    cutLossCooldown--;
+  }
 }
 
 function getCutLossOverride(normalPred) {
+  // Neu dang trong cooldown => khong cut-loss (tranh vong lap sai xen ke)
+  if (cutLossCooldown > 0) return null;
   if (recentPreds.length < 2) return null;
 
-  // Check 2 phien: sai lien tiep 2 lan => dao phien sai gan nhat
+  // Check 2 phien: sai lien tiep => dao phien sai gan nhat
   const last2 = recentPreds.slice(0, 2);
   if (last2.every(p => !p.correct)) {
     const lastWrongPred = last2[0].pred;
     const override = lastWrongPred === 'Tai' ? 'Xiu' : 'Tai';
     return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
-      ly_giai: `Sai lien tiep 2 lan (${last2.map(p=>p.pred).join(',')}) => dao sang ${override}` };
+      ly_giai: `Sai lien tiep 2 lan (${last2.map(p=>p.pred).join(',')}) => dao sang ${override}`,
+      isCutLoss: true };
   }
 
   return null;
@@ -298,7 +308,7 @@ function connectWebSocket() {
                 if (!pred) continue;
                 const actual = missed.Ket_qua;
                 const correct = pred.pred === actual;
-                updateRecentPreds(pred.pred, actual);
+                updateRecentPreds(pred.pred, actual, pred.isCutLoss);
                 if (!predLog.some(p => p.phien === missed.Phien)) {                  predLog.unshift({
                     phien: missed.Phien,
                     du_doan: pred.pred,
@@ -334,7 +344,7 @@ function connectWebSocket() {
               const actual = sorted[i].Ket_qua;
               const correct = pred.pred === actual;
               // Cap nhat recentPreds trong backfill de CutLoss hoat dong
-              updateRecentPreds(pred.pred, actual);
+              updateRecentPreds(pred.pred, actual, pred.isCutLoss);
               predLog.push({
                 phien: sorted[i].Phien,
                 du_doan: pred.pred,
@@ -380,7 +390,7 @@ function connectWebSocket() {
           if (pendingPred && lichSu.length >= WINDOW) {
             const correct = pendingPred.pred === result;
             // Cap nhat recent predictions de cut-loss
-            updateRecentPreds(pendingPred.pred, result);
+            updateRecentPreds(pendingPred.pred, result, pendingPred.isCutLoss);
             const logEntry = {
               phien: entry.Phien,
               du_doan: pendingPred.pred,
