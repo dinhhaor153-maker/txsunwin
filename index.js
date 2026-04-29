@@ -542,6 +542,132 @@ function predictByConfig(config, w, tw) {
       if (a1<a2&&a2<a3) return 'Xiu';
     }
   }
+  // --- Cau 3-1 (3 roi 1 xen ke) ---
+  else if (t==='cau_31') {
+    const rc=wTX.slice(-8);
+    if (rc.length>=6) {
+      let groups=[]; let cur=rc[0]; let cnt=1;
+      for (let i=1;i<rc.length;i++) {
+        if (rc[i]===cur) cnt++;
+        else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+      }
+      groups.push({v:cur,c:cnt});
+      if (groups.length>=2) {
+        const g=groups.slice(-2);
+        if ((g[0].c===3&&g[1].c>=1)||(g[0].c===1&&g[1].c>=3)) {
+          const expected=g[0].c===3?1:3;
+          if (g[1].c<expected) return g[1].v==='T'?'Tai':'Xiu';
+          else return g[1].v==='T'?'Xiu':'Tai';
+        }
+      }
+    }
+  }
+  // --- Cau 2-1 (2 roi 1 xen ke) ---
+  else if (t==='cau_21') {
+    const rc=wTX.slice(-9);
+    if (rc.length>=6) {
+      let groups=[]; let cur=rc[0]; let cnt=1;
+      for (let i=1;i<rc.length;i++) {
+        if (rc[i]===cur) cnt++;
+        else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+      }
+      groups.push({v:cur,c:cnt});
+      if (groups.length>=3) {
+        const g=groups.slice(-3);
+        if ((g[0].c===2&&g[1].c===1&&g[2].c===2)||(g[0].c===1&&g[1].c===2&&g[2].c===1)) {
+          const expected=g[2].c===2?1:2;
+          if (g[2].c<expected) return g[2].v==='T'?'Tai':'Xiu';
+          else return g[2].v==='T'?'Xiu':'Tai';
+        }
+      }
+    }
+  }
+  // --- Phan tich xuc xac rieng le (tong xuc xac 1+2+3) ---
+  else if (t==='dice_sum_range') {
+    const {hi,lo}=config;
+    if (tw.length>=1) {
+      const lt=tw[0];
+      if (lt>=hi) return 'Xiu'; // tong cao => phien sau thap
+      if (lt<=lo) return 'Tai'; // tong thap => phien sau cao
+    }
+  }
+  // --- So sanh 2 avg khac nhau (crossover) ---
+  else if (t==='avg_crossover') {
+    const {n_fast,n_slow}=config;
+    if (tw.length>=n_slow) {
+      const fast=tw.slice(0,n_fast).reduce((a,b)=>a+b,0)/n_fast;
+      const slow=tw.slice(0,n_slow).reduce((a,b)=>a+b,0)/n_slow;
+      if (fast>slow) return 'Tai';  // fast vuot slow => tang
+      if (fast<slow) return 'Xiu';  // fast xuong duoi slow => giam
+    }
+  }
+  // --- Dem so lan doi chieu trong window (oscillation) ---
+  else if (t==='oscillation') {
+    const {n_win,hi_flip,lo_flip}=config;
+    const rc=wTX.slice(-n_win);
+    let flips=0;
+    for (let i=1;i<rc.length;i++) if (rc[i]!==rc[i-1]) flips++;
+    if (flips>=hi_flip) return anti; // dao nhieu => tiep tuc dao
+    if (flips<=lo_flip) return last; // it dao => theo chuoi
+  }
+  // --- Tong diem trung binh so voi lich su dai han ---
+  else if (t==='long_short_compare') {
+    const {n_short,n_long,thresh_diff}=config;
+    if (tw.length>=n_long) {
+      const short_avg=tw.slice(0,n_short).reduce((a,b)=>a+b,0)/n_short;
+      const long_avg=tw.slice(0,n_long).reduce((a,b)=>a+b,0)/n_long;
+      const diff=short_avg-long_avg;
+      if (diff>thresh_diff) return 'Tai';
+      if (diff<-thresh_diff) return 'Xiu';
+    }
+  }
+  // --- Pattern 6 phien (64 combo) ---
+  else if (t==='pat6') {
+    const {pat,action}=config;
+    const last6=wTX.slice(-6).join('');
+    if (last6===pat) return action==='BET'?last:anti;
+  }
+  // --- Ket hop avg + odd_even ---
+  else if (t==='avg_oddeven') {
+    const {n_avg,thresh,action_odd,action_even}=config;
+    if (tw.length>=n_avg) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>thresh) {
+        return tw[0]%2===0?action_even:action_odd;
+      } else {
+        return tw[0]%2===0?(action_even==='Tai'?'Xiu':'Tai'):(action_odd==='Tai'?'Xiu':'Tai');
+      }
+    }
+  }
+  // --- Streak + Count TX ket hop ---
+  else if (t==='streak_count') {
+    const {streak_thresh,count_n,count_hi,count_lo}=config;
+    const rc=wTX.slice(-count_n);
+    const tc=rc.filter(x=>x==='T').length;
+    if (s>=streak_thresh) {
+      // Chuoi dai: kiem tra count de quyet dinh theo hay dao
+      if (tc>=count_hi) return last;  // chuoi dai + nhieu T => tiep tuc
+      if (tc<=count_lo) return anti;  // chuoi dai + it T => dao
+      return last;
+    }
+  }
+  // --- Phan tich nhip (rhythm): TXTTXTTXT... ---
+  else if (t==='rhythm') {
+    const {period,offset,action}=config;
+    // Kiem tra xem co pattern lap lai theo chu ky khong
+    const rc=wTX.slice(-period*3);
+    if (rc.length>=period*2) {
+      let match=0;
+      for (let i=0;i<period;i++) {
+        if (rc[rc.length-1-i]===rc[rc.length-1-i-period]) match++;
+      }
+      if (match>=Math.ceil(period*0.7)) {
+        // Co nhip => du doan theo nhip
+        const nextInPattern=rc[rc.length-1-offset];
+        return action==='follow'?nextInPattern==='T'?'Tai':'Xiu':nextInPattern==='T'?'Xiu':'Tai';
+      }
+    }
+  }
   else if (t==='pattern75') {
     if (s>=6) return last;
     const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
@@ -708,7 +834,55 @@ function generateConfigs() {
   for (let n3=2;n3<=4;n3++) for (let n2=2;n2<=4;n2++) for (let n1=n3+n2+2;n1<=12;n1++)
     cfgs.push({type:'acceleration',n1,n2,n3,name:`Accel(n1=${n1},n2=${n2},n3=${n3})`});
 
-  // 27. Pattern-7+5 baseline
+  // 27. Cau 3-1
+  cfgs.push({type:'cau_31',name:'Cau31'});
+
+  // 28. Cau 2-1
+  cfgs.push({type:'cau_21',name:'Cau21'});
+
+  // 29. Dice sum range (tong xuc xac cao/thap => phien sau nguoc lai)
+  for (let hi=13;hi<=17;hi++) for (let lo=5;lo<=9;lo++)
+    cfgs.push({type:'dice_sum_range',hi,lo,name:`DiceSumRange(hi>=${hi},lo<=${lo})`});
+
+  // 30. Avg crossover (fast avg vuot slow avg)
+  for (let nf=2;nf<=6;nf++) for (let ns=nf+2;ns<=15;ns++)
+    cfgs.push({type:'avg_crossover',n_fast:nf,n_slow:ns,name:`AvgCross(fast=${nf},slow=${ns})`});
+
+  // 31. Oscillation (dem so lan doi chieu)
+  for (let nw=5;nw<=12;nw++) for (let hi=Math.ceil(nw*0.7);hi<=nw-1;hi++) for (let lo=0;lo<=Math.floor(nw*0.3);lo++)
+    cfgs.push({type:'oscillation',n_win:nw,hi_flip:hi,lo_flip:lo,name:`Osc(nw=${nw},hi=${hi},lo=${lo})`});
+
+  // 32. Long-short compare (avg ngan vs dai han)
+  for (let ns=3;ns<=7;ns++) for (let nl=ns+5;nl<=20;nl++) for (let td=1;td<=4;td++)
+    cfgs.push({type:'long_short_compare',n_short:ns,n_long:nl,thresh_diff:td/2,name:`LongShort(ns=${ns},nl=${nl},td=${td/2})`});
+
+  // 33. Pattern 6 phien (64 combo - chi lay 1 nua de giam config)
+  const genPats6=()=>{const r=[];const f=(s)=>{if(s.length===6){r.push(s);return;}f(s+'T');f(s+'X');};f('');return r;};
+  for (const pat of genPats6()) {
+    cfgs.push({type:'pat6',pat,action:'BET',  name:`Pat6(${pat}->BET)`});
+    cfgs.push({type:'pat6',pat,action:'NGUOC',name:`Pat6(${pat}->NGUOC)`});
+  }
+
+  // 34. Avg + odd/even
+  for (let na=8;na<=12;na++) for (let tx=88;tx<=112;tx+=4) {
+    const th=tx/10;
+    cfgs.push({type:'avg_oddeven',n_avg:na,thresh:th,action_odd:'Tai', action_even:'Xiu',name:`AvgOdd(na=${na},t=${th},odd=T)`});
+    cfgs.push({type:'avg_oddeven',n_avg:na,thresh:th,action_odd:'Xiu', action_even:'Tai',name:`AvgOdd(na=${na},t=${th},odd=X)`});
+  }
+
+  // 35. Streak + Count TX
+  for (let st=2;st<=6;st++) for (let cn=7;cn<=12;cn++) {
+    const hi=Math.ceil(cn*0.65); const lo=Math.floor(cn*0.35);
+    cfgs.push({type:'streak_count',streak_thresh:st,count_n:cn,count_hi:hi,count_lo:lo,name:`StreakCount(st=${st},cn=${cn})`});
+  }
+
+  // 36. Rhythm (phat hien nhip lap lai)
+  for (let period=3;period<=7;period++) for (let offset=1;offset<=period-1;offset++) {
+    cfgs.push({type:'rhythm',period,offset,action:'follow',name:`Rhythm(p=${period},o=${offset},follow)`});
+    cfgs.push({type:'rhythm',period,offset,action:'anti',  name:`Rhythm(p=${period},o=${offset},anti)`});
+  }
+
+  // 37. Pattern-7+5 baseline
   cfgs.push({type:'pattern75',name:'Pattern75'});
 
   return cfgs;
