@@ -305,6 +305,89 @@ function predictByConfig(config, w, tw) {
       if (avg>thresh) return 'Tai'; if (avg<thresh) return 'Xiu';
     }
   }
+  // --- Cau bet (xen ke T-X-T-X) ---
+  else if (t==='cau_bet') {
+    // Dem so lan doi chieu trong N phien gan nhat
+    const {n_win,min_flip,action}=config;
+    const rc=wTX.slice(-n_win);
+    let flips=0;
+    for (let i=1;i<rc.length;i++) if (rc[i]!==rc[i-1]) flips++;
+    if (flips>=min_flip) {
+      // Dang cau bet => tiep tuc doi chieu
+      return action==='follow'?last:anti;
+    }
+  }
+  // --- Cau 1-2 (1 roi 2 roi 1 roi 2) ---
+  else if (t==='cau_12') {
+    const {n_win}=config;
+    const rc=wTX.slice(-n_win);
+    // Phat hien pattern 1-2: X,T,T,X,X,T,T...
+    let groups=[]; let cur=rc[0]; let cnt=1;
+    for (let i=1;i<rc.length;i++) {
+      if (rc[i]===cur) cnt++;
+      else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+    }
+    groups.push({v:cur,c:cnt});
+    if (groups.length>=3) {
+      const last2=groups.slice(-2);
+      const last3=groups.slice(-3);
+      // Pattern 1-2: alternating 1 and 2
+      if (last3[0].c===1&&last3[1].c===2&&last3[2].c===1) return last3[2].v==='T'?'Xiu':'Tai'; // tiep theo la 2
+      if (last3[0].c===2&&last3[1].c===1&&last3[2].c===2) return last3[2].v==='T'?'Xiu':'Tai'; // tiep theo la 1
+      // Pattern 1-1: all single
+      if (groups.slice(-4).every(g=>g.c===1)) return anti; // tiep tuc xen ke
+    }
+  }
+  // --- Ti le T/X trong 21 phien (keo ve trung binh) ---
+  else if (t==='balance_21') {
+    const {thresh_hi,thresh_lo}=config;
+    const tRate=c21/21;
+    if (tRate>thresh_hi) return 'Xiu'; // Tai nhieu qua => keo ve Xiu
+    if (tRate<thresh_lo) return 'Tai'; // Xiu nhieu qua => keo ve Tai
+  }
+  // --- Adaptive flip: khi sai N lien tiep, dao nguoc bat ky algo ---
+  else if (t==='adaptive_flip') {
+    const {base_type,base_config,flip_at}=config;
+    // Tinh chuoi sai hien tai tu predLog
+    let curWrong=0;
+    for (const p of predLog) { if (!p.dung) curWrong++; else break; }
+    const basePred=predictByConfig({type:base_type,...base_config},w,tw);
+    if (curWrong>=flip_at) return basePred==='Tai'?'Xiu':'Tai';
+    return basePred;
+  }
+  // --- Ket hop 2 dieu kien (AND logic) ---
+  else if (t==='combo_and') {
+    const {cond1,cond2,agree_action}=config;
+    const p1=predictByConfig(cond1,w,tw);
+    const p2=predictByConfig(cond2,w,tw);
+    if (p1&&p2&&p1===p2) return p1; // ca 2 dong y
+    // Neu khong dong y => fallback Pattern
+  }
+  // --- Tong diem tuyet doi (so sanh voi nguong tuyet doi) ---
+  else if (t==='last_total') {
+    const {n_check,hi_thresh,lo_thresh}=config;
+    // Xem N phien gan nhat co tong cao hay thap
+    const recent_tw=tw.slice(0,n_check);
+    if (recent_tw.length<n_check) { /* fallback */ }
+    else {
+      const hi_cnt=recent_tw.filter(x=>x>hi_thresh).length;
+      const lo_cnt=recent_tw.filter(x=>x<lo_thresh).length;
+      if (hi_cnt>=Math.ceil(n_check*0.6)) return 'Tai';
+      if (lo_cnt>=Math.ceil(n_check*0.6)) return 'Xiu';
+    }
+  }
+  // --- Phan tich bien dong (variance) ---
+  else if (t==='variance') {
+    const {n_win,hi_var,action_hi,action_lo}=config;
+    const rc=tw.slice(0,n_win);
+    if (rc.length<n_win) { /* fallback */ }
+    else {
+      const mean=rc.reduce((a,b)=>a+b,0)/n_win;
+      const variance=rc.reduce((a,b)=>a+(b-mean)*(b-mean),0)/n_win;
+      if (variance>hi_var) return action_hi==='Tai'?'Tai':'Xiu';
+      else return action_lo==='Tai'?'Tai':'Xiu';
+    }
+  }
   else if (t==='pattern75') {
     if (s>=6) return last;
     const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
@@ -330,35 +413,81 @@ function predictByConfig(config, w, tw) {
 // Sinh danh sach tat ca config can test
 function generateConfigs() {
   const cfgs = [];
-  // 1. AvgTotal
+
+  // 1. AvgTotal (trung binh tong diem N phien)
   for (let na=5;na<=15;na++) for (let tx=80;tx<=125;tx+=5)
     cfgs.push({type:'avg_total',n_avg:na,thresh:tx/10,name:`AvgTotal(n=${na},t=${tx/10})`});
-  // 2. AvgTotal + Count TX
+
+  // 2. AvgTotal + Count TX (avg + dem T/X)
   for (let na=7;na<=12;na++) for (let tx=85;tx<=115;tx+=5) {
     const th=tx/10;
     for (let nw=5;nw<=13;nw++) for (let hi=Math.ceil(nw*0.6);hi<=nw;hi++)
       cfgs.push({type:'avg_count',n_avg:na,thresh:th,n_win:nw,hi,name:`AvgCount(na=${na},t=${th},nw=${nw},hi=${hi})`});
   }
-  // 3. Momentum
+
+  // 3. Momentum (xu huong tang/giam)
   for (let na=7;na<=13;na++) for (let tx=86;tx<=114;tx+=4) {
     const th=tx/10;
     for (let ns=2;ns<=5;ns++) for (let nl=ns+3;nl<=12;nl++) for (let dx=2;dx<=15;dx+=2)
       cfgs.push({type:'momentum',n_avg:na,thresh:th,n_short:ns,n_long:nl,delta:dx/10,name:`Mom(na=${na},t=${th},ns=${ns},nl=${nl},d=${dx/10})`});
   }
-  // 4. Streak-based
+
+  // 4. Streak-based (theo/dao chuoi)
   for (let sf=3;sf<=8;sf++) for (let fp=2;fp<=sf-1;fp++)
     cfgs.push({type:'streak',follow_thresh:sf,flip_thresh:fp,name:`Streak(f=${sf},p=${fp})`});
-  // 5. Count TX
+
+  // 5. Count TX (dem T/X thuan)
   for (let nw=5;nw<=15;nw++) for (let hi=Math.ceil(nw*0.6);hi<=nw;hi++) for (let lo=0;lo<=Math.floor(nw*0.35);lo++)
     cfgs.push({type:'count_tx',n_win:nw,hi,lo,name:`CountTX(nw=${nw},hi=${hi},lo=${lo})`});
+
   // 6. AvgTotal + Streak
   for (let na=7;na<=12;na++) for (let tx=87;tx<=113;tx+=4) {
     const th=tx/10;
     for (let sf=4;sf<=8;sf++) for (let fp=2;fp<=sf-1;fp++)
       cfgs.push({type:'avg_streak',n_avg:na,thresh:th,streak_follow:sf,streak_flip:fp,name:`AvgStreak(na=${na},t=${th},sf=${sf},fp=${fp})`});
   }
-  // 7. Pattern-7+5 baseline
+
+  // 7. Cau bet (xen ke T-X lien tuc)
+  for (let nw=4;nw<=10;nw++) for (let mf=Math.ceil(nw*0.6);mf<=nw-1;mf++) {
+    cfgs.push({type:'cau_bet',n_win:nw,min_flip:mf,action:'follow',name:`CauBet(nw=${nw},mf=${mf},follow)`});
+    cfgs.push({type:'cau_bet',n_win:nw,min_flip:mf,action:'anti',name:`CauBet(nw=${nw},mf=${mf},anti)`});
+  }
+
+  // 8. Ti le T/X trong 21 phien (keo ve can bang)
+  for (let hi=60;hi<=80;hi+=5) for (let lo=20;lo<=40;lo+=5)
+    if (hi+lo<=100)
+      cfgs.push({type:'balance_21',thresh_hi:hi/100,thresh_lo:lo/100,name:`Balance21(hi=${hi}%,lo=${lo}%)`});
+
+  // 9. Tong diem tuyet doi (N phien gan nhat co tong cao/thap)
+  for (let nc=3;nc<=8;nc++) for (let hi=12;hi<=16;hi++) for (let lo=6;lo<=9;lo++)
+    cfgs.push({type:'last_total',n_check:nc,hi_thresh:hi,lo_thresh:lo,name:`LastTotal(n=${nc},hi>${hi},lo<${lo})`});
+
+  // 10. Phan tich bien dong (variance cao => ngau nhien, thap => co xu huong)
+  for (let nw=5;nw<=10;nw++) for (let hv=3;hv<=8;hv++) {
+    cfgs.push({type:'variance',n_win:nw,hi_var:hv,action_hi:'Xiu',action_lo:'Tai',name:`Var(nw=${nw},hv=${hv},hi=X)`});
+    cfgs.push({type:'variance',n_win:nw,hi_var:hv,action_hi:'Tai',action_lo:'Xiu',name:`Var(nw=${nw},hv=${hv},hi=T)`});
+  }
+
+  // 11. Adaptive flip AvgTotal (khi sai N lien tiep thi dao)
+  for (let na=8;na<=12;na++) for (let tx=88;tx<=112;tx+=4) {
+    const th=tx/10;
+    for (let fa=2;fa<=4;fa++)
+      cfgs.push({type:'adaptive_flip',base_type:'avg_total',base_config:{n_avg:na,thresh:th},flip_at:fa,name:`AdaptFlip(avg,na=${na},t=${th},fa=${fa})`});
+  }
+
+  // 12. Combo AND: AvgTotal + CountTX phai dong y
+  for (let na=8;na<=12;na++) for (let tx=88;tx<=112;tx+=4) {
+    const th=tx/10;
+    for (let nw=7;nw<=11;nw++) for (let hi=Math.ceil(nw*0.65);hi<=nw;hi++)
+      cfgs.push({type:'combo_and',
+        cond1:{type:'avg_total',n_avg:na,thresh:th},
+        cond2:{type:'count_tx',n_win:nw,hi,lo:Math.floor(nw*0.35)},
+        name:`ComboAND(avg_na=${na}_t=${th},cnt_nw=${nw}_hi=${hi})`});
+  }
+
+  // 13. Pattern-7+5 baseline
   cfgs.push({type:'pattern75',name:'Pattern75'});
+
   return cfgs;
 }
 
