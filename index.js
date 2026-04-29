@@ -119,7 +119,7 @@ function getStreak(w) {
   return s;
 }
 
-function runPredict(w, recentTotals) {
+function runPredict(w, recentTotals, recentPredResults) {
   if (w.length < WINDOW) return null;
   const last = w[w.length - 1];
   const anti = last === 'Tai' ? 'Xiu' : 'Tai';
@@ -138,11 +138,29 @@ function runPredict(w, recentTotals) {
   const k7   = keyOf(pat7);
   const k5   = keyOf(pat5);
 
-  // Tinh trung binh tong diem 10 phien gan nhat
-  let avgTotal = null;
-  if (recentTotals && recentTotals.length >= 10) {
-    const last10 = recentTotals.slice(0, 10);
-    avgTotal = last10.reduce((a,b) => a+b, 0) / 10;
+  // ── Tinh avg9 va momentum ──
+  // avg9: trung binh tong diem 9 phien gan nhat
+  // momentum: avg 3 phien gan - avg 4 phien truoc do (phien 4..7)
+  let avg9 = null, momentum = null;
+  if (recentTotals && recentTotals.length >= 9) {
+    const last9 = recentTotals.slice(0, 9);
+    avg9 = last9.reduce((a,b) => a+b, 0) / 9;
+  }
+  if (recentTotals && recentTotals.length >= 7) {
+    const short3 = recentTotals.slice(0, 3);
+    const prev4  = recentTotals.slice(3, 7);
+    const avgShort = short3.reduce((a,b) => a+b, 0) / 3;
+    const avgPrev  = prev4.reduce((a,b) => a+b, 0) / 4;
+    momentum = avgShort - avgPrev;
+  }
+
+  // ── Tinh chuoi sai hien tai ──
+  let curWrong = 0;
+  if (recentPredResults && recentPredResults.length > 0) {
+    for (const r of recentPredResults) {
+      if (!r.correct) curWrong++;
+      else break;
+    }
   }
 
   // Phan tich chi tiet de tra ve
@@ -160,22 +178,48 @@ function runPredict(w, recentTotals) {
     hit_table5: !!T5[k5],
     action_table7: T7[k7] || null,
     action_table5: T5[k5] || null,
-    avg_tong_10: avgTotal ? avgTotal.toFixed(2) : null
+    avg_tong_9: avg9 ? avg9.toFixed(2) : null,
+    momentum: momentum ? momentum.toFixed(2) : null,
+    chuoi_sai_hien_tai: curWrong
   };
 
-  // ── ƯU TIÊN 1: Trung binh tong diem 10 phien (acc=57.5%, max=3) ──
-  // Neu avg > 9.5 => Tai, avg < 9.5 => Xiu
-  if (avgTotal !== null && avgTotal !== 9.5) {
-    if (avgTotal > 9.5) {
-      return { pred: 'Tai', algo: 'AvgTotal10->Tai', conf: 74,
-        ly_giai: `TB tong diem 10 phien = ${avgTotal.toFixed(2)} > 9.5 => du doan Tai`, detail };
-    } else {
-      return { pred: 'Xiu', algo: 'AvgTotal10->Xiu', conf: 74,
-        ly_giai: `TB tong diem 10 phien = ${avgTotal.toFixed(2)} < 9.5 => du doan Xiu`, detail };
-    }
+  // ── Tinh du doan base tu avg9 + momentum ──
+  // Nguong: avg9=9.6, delta_momentum=0.5
+  const THRESH = 9.6;
+  const DELTA  = 0.5;
+
+  let avgPred = null; // du doan tu avg+momentum
+  if (avg9 !== null && momentum !== null) {
+    if (avg9 > THRESH && momentum >= -DELTA)      avgPred = 'Tai';
+    else if (avg9 < THRESH && momentum <= DELTA)  avgPred = 'Xiu';
+    else if (momentum > DELTA)                    avgPred = 'Tai';
+    else if (momentum < -DELTA)                   avgPred = 'Xiu';
+  } else if (avg9 !== null) {
+    if (avg9 > THRESH)      avgPred = 'Tai';
+    else if (avg9 < THRESH) avgPred = 'Xiu';
   }
 
-  // ── ƯU TIÊN 2: Streak cuc dai (>=6) — theo chuoi ──
+  // ── ƯU TIÊN 1: Neu dang sai >= 3 lien tiep => dao nguoc avgPred ──
+  if (curWrong >= 3 && avgPred !== null) {
+    const flipped = avgPred === 'Tai' ? 'Xiu' : 'Tai';
+    return {
+      pred: flipped, algo: `Flip(sai${curWrong})`, conf: 68,
+      ly_giai: `Dang sai ${curWrong} lien tiep, dao nguoc avg9=${avg9 ? avg9.toFixed(2) : '?'} => ${flipped}`,
+      detail
+    };
+  }
+
+  // ── ƯU TIÊN 2: avg9 + momentum ──
+  if (avgPred !== null) {
+    const algoName = avg9 > THRESH ? `AvgMomentum->Tai` : `AvgMomentum->Xiu`;
+    return {
+      pred: avgPred, algo: algoName, conf: 74,
+      ly_giai: `avg9=${avg9 ? avg9.toFixed(2) : '?'} momentum=${momentum ? momentum.toFixed(2) : '?'} => ${avgPred}`,
+      detail
+    };
+  }
+
+  // ── ƯU TIÊN 3: Streak cuc dai (>=6) — theo chuoi ──
   if (s >= 6) {
     return { pred: last, algo: `Streak${s}->Theo`, conf: 75,
       ly_giai: `Chuoi ${lastTX} lien tiep ${s} phien rat dai => theo chuoi ${last}`, detail };
@@ -291,7 +335,7 @@ function connectWebSocket() {
                 if (idx < WINDOW) continue;
                 const w = sorted.slice(idx - WINDOW, idx).map(x => x.Ket_qua);
                 const recentTotals = sorted.slice(idx - 10, idx).map(x => x.Tong).reverse();
-                const pred = runPredict(w, recentTotals);
+                const pred = runPredict(w, recentTotals, recentPreds);
                 if (!pred) continue;
                 const actual = missed.Ket_qua;
                 const correct = pred.pred === actual;
@@ -327,7 +371,7 @@ function connectWebSocket() {
             for (let i = WINDOW; i < sorted.length; i++) {
               const w = sorted.slice(i - WINDOW, i).map(x => x.Ket_qua);
               const recentTotals = sorted.slice(i - 10, i).map(x => x.Tong).reverse();
-              const pred = runPredict(w, recentTotals);
+              const pred = runPredict(w, recentTotals, recentPreds);
               if (!pred) continue;
               const actual = sorted[i].Ket_qua;
               const correct = pred.pred === actual;
@@ -360,7 +404,7 @@ function connectWebSocket() {
           if (lichSu.length >= WINDOW && !pendingPred) {
             const w = lichSu.slice(0, WINDOW).map(x => x.Ket_qua).reverse();
             const recentTotals = lichSu.slice(0, 10).map(x => x.Tong);
-            pendingPred = runPredict(w, recentTotals);
+            pendingPred = runPredict(w, recentTotals, recentPreds);
             if (pendingPred) {
               console.log('[NEXT] Du doan phien tiep: '+pendingPred.pred+' ('+pendingPred.algo+', conf='+pendingPred.conf+'%)');
             }
@@ -406,7 +450,7 @@ function connectWebSocket() {
           if (lichSu.length >= WINDOW) {
             const w = lichSu.slice(0, WINDOW).map(x => x.Ket_qua).reverse();
             const recentTotals = lichSu.slice(0, 10).map(x => x.Tong);
-            pendingPred = runPredict(w, recentTotals);
+            pendingPred = runPredict(w, recentTotals, recentPreds);
             if (pendingPred) {
               console.log('[NEXT] Du doan phien tiep: '+pendingPred.pred+' ('+pendingPred.algo+', conf='+pendingPred.conf+'%)');
             }
@@ -453,7 +497,7 @@ app.get('/api/dudoan', (req,res) => {
   }
   const w = lichSu.slice(0, WINDOW).map(x => x.Ket_qua).reverse();
   const recentTotals = lichSu.slice(0, 10).map(x => x.Tong);
-  const result = runPredict(w, recentTotals);
+  const result = runPredict(w, recentTotals, recentPreds);
   if (!result) return res.json({ status:'error', message:'Khong the du doan', can_predict:false });
 
   const total_pred = predLog.length;
