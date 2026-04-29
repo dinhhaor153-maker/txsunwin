@@ -91,6 +91,32 @@ const T5 = {
 };
 
 // ============================================================
+// RECENT PREDICTION MEMORY (de cut-loss)
+// ============================================================
+let recentPreds = []; // [{pred, actual, correct}] — toi da 10 phien gan nhat
+
+function updateRecentPreds(pred, actual) {
+  recentPreds.unshift({ pred, actual, correct: pred === actual });
+  if (recentPreds.length > 10) recentPreds = recentPreds.slice(0, 10);
+}
+
+function getCutLossOverride(normalPred) {
+  // Neu sai lien tiep >= 2 lan cung huong (cung du doan 1 loai ma sai)
+  // thi dao nguoc lai
+  if (recentPreds.length < 2) return null;
+  const last2 = recentPreds.slice(0, 2);
+  const allWrong = last2.every(p => !p.correct);
+  const samePred = last2.every(p => p.pred === last2[0].pred);
+  if (allWrong && samePred) {
+    const wrongPred = last2[0].pred;
+    const override = wrongPred === 'Tai' ? 'Xiu' : 'Tai';
+    return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
+      ly_giai: `Sai lien tiep 2 lan du doan ${wrongPred} => dao sang ${override}` };
+  }
+  return null;
+}
+
+// ============================================================
 // PREDICTION ENGINE
 // ============================================================
 function keyOf(arr) {
@@ -141,6 +167,19 @@ function runPredict(w) {
     action_table7: T7[k7] || null,
     action_table5: T5[k5] || null
   };
+
+  // ── ƯUTIEN 1: Cut-loss — sai lien tiep 2 lan cung huong ──
+  const cutLoss = getCutLossOverride(null);
+  if (cutLoss) {
+    return { ...cutLoss, detail };
+  }
+
+  // ── ƯUTIEN 2: Streak cuc dai (>=6) — theo chuoi, khong dao ──
+  // Neu streak >= 6 ma Pattern bao NGUOC => bo qua Pattern, theo chuoi
+  if (s >= 6) {
+    return { pred: last, algo: `Streak${s}->Theo`, conf: 75,
+      ly_giai: `Chuoi ${lastTX} lien tiep ${s} phien rat dai => theo chuoi ${last}`, detail };
+  }
 
   // Table 7
   if (T7[k7]) {
@@ -291,6 +330,8 @@ function connectWebSocket() {
           // Neu co pending prediction => ghi ket qua dung/sai
           if (pendingPred && lichSu.length >= WINDOW) {
             const correct = pendingPred.pred === result;
+            // Cap nhat recent predictions de cut-loss
+            updateRecentPreds(pendingPred.pred, result);
             const logEntry = {
               phien: entry.Phien,
               du_doan: pendingPred.pred,
