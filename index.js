@@ -669,6 +669,118 @@ function predictByConfig(config, w, tw) {
       }
     }
   }
+  // --- EMA (Exponential Moving Average) ---
+  else if (t==='ema') {
+    const {n,thresh,alpha}=config;
+    if (tw.length>=n) {
+      let ema=tw[n-1];
+      for (let i=n-2;i>=0;i--) ema=alpha*tw[i]+(1-alpha)*ema;
+      if (ema>thresh) return 'Tai';
+      if (ema<thresh) return 'Xiu';
+    }
+  }
+  // --- RSI-style ---
+  else if (t==='rsi_style') {
+    const {n,thresh_hi,thresh_lo}=config;
+    if (tw.length>=n+1) {
+      let gains=0,losses=0;
+      for (let i=0;i<n;i++) {
+        const diff=tw[i]-tw[i+1];
+        if (diff>0) gains+=diff; else losses+=(-diff);
+      }
+      const rs=losses===0?100:(gains/losses);
+      const rsi=100-(100/(1+rs));
+      if (rsi>thresh_hi) return 'Xiu';
+      if (rsi<thresh_lo) return 'Tai';
+    }
+  }
+  // --- Bollinger-style ---
+  else if (t==='bollinger') {
+    const {n,mult}=config;
+    if (tw.length>=n) {
+      const avg=tw.slice(0,n).reduce((a,b)=>a+b,0)/n;
+      const std=Math.sqrt(tw.slice(0,n).reduce((a,b)=>a+(b-avg)*(b-avg),0)/n);
+      const upper=avg+mult*std;
+      const lower=avg-mult*std;
+      if (tw[0]>upper) return 'Xiu';
+      if (tw[0]<lower) return 'Tai';
+      if (tw[0]>avg)   return 'Tai';
+      return 'Xiu';
+    }
+  }
+  // --- Markov chain ---
+  else if (t==='markov') {
+    const {n,thresh}=config;
+    if (w.length>=n+1) {
+      const recent=wTX.slice(-n-1);
+      let tt=0,tx=0,xt=0,xx=0;
+      for (let i=0;i<recent.length-1;i++) {
+        if (recent[i]==='T'&&recent[i+1]==='T') tt++;
+        else if (recent[i]==='T'&&recent[i+1]==='X') tx++;
+        else if (recent[i]==='X'&&recent[i+1]==='T') xt++;
+        else xx++;
+      }
+      const curLast=wTX[wTX.length-1];
+      if (curLast==='T') {
+        const total=tt+tx; if (total>0) return tt/total>thresh?'Tai':'Xiu';
+      } else {
+        const total=xt+xx; if (total>0) return xt/total>thresh?'Tai':'Xiu';
+      }
+    }
+  }
+  // --- Cau 1-4 ---
+  else if (t==='cau_14') {
+    const rc=wTX.slice(-10);
+    if (rc.length>=5) {
+      let groups=[]; let cur=rc[0]; let cnt=1;
+      for (let i=1;i<rc.length;i++) {
+        if (rc[i]===cur) cnt++;
+        else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+      }
+      groups.push({v:cur,c:cnt});
+      if (groups.length>=2) {
+        const g=groups.slice(-2);
+        if ((g[0].c===1&&g[1].c>=1)||(g[0].c===4&&g[1].c>=1)) {
+          const expected=g[0].c===1?4:1;
+          if (g[1].c<expected) return g[1].v==='T'?'Tai':'Xiu';
+          else return g[1].v==='T'?'Xiu':'Tai';
+        }
+      }
+    }
+  }
+  // --- Cau 2-3 ---
+  else if (t==='cau_23') {
+    const rc=wTX.slice(-10);
+    if (rc.length>=5) {
+      let groups=[]; let cur=rc[0]; let cnt=1;
+      for (let i=1;i<rc.length;i++) {
+        if (rc[i]===cur) cnt++;
+        else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+      }
+      groups.push({v:cur,c:cnt});
+      if (groups.length>=3) {
+        const g=groups.slice(-3);
+        if ((g[0].c===2&&g[1].c===3)||(g[0].c===3&&g[1].c===2)) {
+          const expected=g[1].c===3?2:3;
+          if (g[2].c<expected) return g[2].v==='T'?'Tai':'Xiu';
+          else return g[2].v==='T'?'Xiu':'Tai';
+        }
+      }
+    }
+  }
+  // --- EMA + Count TX ---
+  else if (t==='ema_count') {
+    const {n,alpha,thresh,n_win,hi}=config;
+    if (tw.length>=n) {
+      let ema=tw[n-1];
+      for (let i=n-2;i>=0;i--) ema=alpha*tw[i]+(1-alpha)*ema;
+      if (ema>thresh) return 'Tai';
+      if (ema<thresh) return 'Xiu';
+    }
+    const rc=wTX.slice(-n_win);
+    if (rc.filter(x=>x==='T').length>=hi) return 'Tai';
+    if (rc.filter(x=>x==='X').length>=hi) return 'Xiu';
+  }
   else if (t==='pattern75') {
     if (s>=6) return last;
     const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
@@ -883,7 +995,36 @@ function generateConfigs() {
     cfgs.push({type:'rhythm',period,offset,action:'anti',  name:`Rhythm(p=${period},o=${offset},anti)`});
   }
 
-  // 37. Pattern-7+5 baseline
+  // 38. EMA
+  for (let n=5;n<=15;n++) for (let tx=80;tx<=125;tx+=5) for (let ax=2;ax<=8;ax++)
+    cfgs.push({type:'ema',n,thresh:tx/10,alpha:ax/10,name:`EMA(n=${n},t=${tx/10},a=${ax/10})`});
+
+  // 39. RSI-style
+  for (let n=5;n<=14;n++) for (let hi=60;hi<=80;hi+=5) for (let lo=20;lo<=40;lo+=5)
+    cfgs.push({type:'rsi_style',n,thresh_hi:hi,thresh_lo:lo,name:`RSI(n=${n},hi=${hi},lo=${lo})`});
+
+  // 40. Bollinger-style
+  for (let n=5;n<=15;n++) for (let mult=10;mult<=30;mult+=5)
+    cfgs.push({type:'bollinger',n,mult:mult/10,name:`Bollinger(n=${n},mult=${mult/10})`});
+
+  // 41. Markov chain
+  for (let n=10;n<=21;n++) for (let tx=50;tx<=75;tx+=5)
+    cfgs.push({type:'markov',n,thresh:tx/100,name:`Markov(n=${n},t=${tx/100})`});
+
+  // 42. Cau 1-4
+  cfgs.push({type:'cau_14',name:'Cau14'});
+
+  // 43. Cau 2-3
+  cfgs.push({type:'cau_23',name:'Cau23'});
+
+  // 44. EMA + Count TX
+  for (let n=7;n<=12;n++) for (let tx=88;tx<=112;tx+=4) for (let ax=2;ax<=6;ax++) {
+    const th=tx/10; const alpha=ax/10;
+    for (let nw=7;nw<=11;nw++) for (let hi=Math.ceil(nw*0.65);hi<=nw;hi++)
+      cfgs.push({type:'ema_count',n,alpha,thresh:th,n_win:nw,hi,name:`EMACount(n=${n},a=${alpha},t=${th},nw=${nw},hi=${hi})`});
+  }
+
+  // 45. Pattern-7+5 baseline
   cfgs.push({type:'pattern75',name:'Pattern75'});
 
   return cfgs;
