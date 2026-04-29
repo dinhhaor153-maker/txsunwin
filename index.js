@@ -138,91 +138,311 @@ function runPredict(w, recentTotals, recentPredResults) {
   const k7   = keyOf(pat7);
   const k5   = keyOf(pat5);
 
-  // Tinh trung binh tong diem 10 phien gan nhat
   let avgTotal = null;
   if (recentTotals && recentTotals.length >= 10) {
-    const last10 = recentTotals.slice(0, 10);
-    avgTotal = last10.reduce((a,b) => a+b, 0) / 10;
+    avgTotal = recentTotals.slice(0,10).reduce((a,b)=>a+b,0)/10;
   }
 
-  // Phan tich chi tiet de tra ve
   const detail = {
-    window_7:  pat7,
-    window_5:  pat5,
-    key_7:     k7,
-    key_5:     k5,
-    streak_hien_tai: s,
-    loai_streak: lastTX,
-    dem_5_phien: { [lastTX]: c5, [lastTX==='T'?'X':'T']: 5-c5 },
+    window_7: pat7, window_5: pat5, key_7: k7, key_5: k5,
+    streak_hien_tai: s, loai_streak: lastTX,
+    dem_5_phien:  { [lastTX]: c5,  [lastTX==='T'?'X':'T']: 5-c5  },
     dem_10_phien: { T: wTX.slice(-10).filter(x=>x==='T').length, X: wTX.slice(-10).filter(x=>x==='X').length },
     dem_21_phien: { T: c21, X: 21-c21 },
-    hit_table7: !!T7[k7],
-    hit_table5: !!T5[k5],
-    action_table7: T7[k7] || null,
-    action_table5: T5[k5] || null,
+    hit_table7: !!T7[k7], hit_table5: !!T5[k5],
+    action_table7: T7[k7]||null, action_table5: T5[k5]||null,
     avg_tong_10: avgTotal ? avgTotal.toFixed(2) : null
   };
 
-  // ── ƯU TIÊN 1: Trung binh tong diem 10 phien (acc=55.7%, max=3) ──
-  // Nguong 9.5: test tren 100 phien thuc te cho ket qua on dinh nhat
-  if (avgTotal !== null && avgTotal !== 9.5) {
-    if (avgTotal > 9.5) {
-      return { pred: 'Tai', algo: 'AvgTotal10->Tai', conf: 74,
-        ly_giai: `TB tong diem 10 phien = ${avgTotal.toFixed(2)} > 9.5 => du doan Tai`, detail };
-    } else {
-      return { pred: 'Xiu', algo: 'AvgTotal10->Xiu', conf: 74,
-        ly_giai: `TB tong diem 10 phien = ${avgTotal.toFixed(2)} < 9.5 => du doan Xiu`, detail };
+  // ── UU TIEN 1: Dung best algo tu auto-search (neu dat target max_sai<=2) ──
+  if (autoSearchState && autoSearchState.best && autoSearchState.best.achieved_target) {
+    const tw = recentTotals ? recentTotals.slice(0,15) : [];
+    const pred = predictByConfig(autoSearchState.best.config, w, tw);
+    if (pred) {
+      return {
+        pred, algo: 'AutoBest:'+autoSearchState.best.name, conf: 82,
+        ly_giai: `Auto-search best (acc=${autoSearchState.best.acc.toFixed(1)}% max_sai=${autoSearchState.best.max_sai}) => ${pred}`,
+        detail
+      };
     }
   }
 
-  // ── ƯU TIÊN 2: Streak cuc dai (>=6) — theo chuoi ──
-  if (s >= 6) {
-    return { pred: last, algo: `Streak${s}->Theo`, conf: 75,
-      ly_giai: `Chuoi ${lastTX} lien tiep ${s} phien rat dai => theo chuoi ${last}`, detail };
+  // ── UU TIEN 2: AvgTotal10 fallback ──
+  if (avgTotal !== null && avgTotal !== 9.5) {
+    if (avgTotal > 9.5) return { pred:'Tai', algo:'AvgTotal10->Tai', conf:74,
+      ly_giai:`TB tong diem 10 phien = ${avgTotal.toFixed(2)} > 9.5 => Tai`, detail };
+    return { pred:'Xiu', algo:'AvgTotal10->Xiu', conf:74,
+      ly_giai:`TB tong diem 10 phien = ${avgTotal.toFixed(2)} < 9.5 => Xiu`, detail };
   }
+
+  // ── UU TIEN 3: Streak cuc dai ──
+  if (s >= 6) return { pred:last, algo:`Streak${s}->Theo`, conf:75,
+    ly_giai:`Chuoi ${lastTX} lien tiep ${s} phien => theo ${last}`, detail };
 
   // Table 7
   if (T7[k7]) {
     const action = T7[k7];
-    const pred = action === 'BET' ? last : anti;
-    return {
-      pred, algo: 'Pattern-7', conf: 72,
-      ly_giai: `Pattern-7 [${pat7.join(',')}] => ${action} => du doan ${pred}`,
-      detail
-    };
+    const pred = action==='BET'?last:anti;
+    return { pred, algo:'Pattern-7', conf:72,
+      ly_giai:`Pattern-7 [${pat7.join(',')}] => ${action} => ${pred}`, detail };
   }
-
   // Table 5
   if (T5[k5]) {
     const action = T5[k5];
-    const pred = action === 'BET' ? last : anti;
-    return {
-      pred, algo: 'Pattern-5', conf: 65,
-      ly_giai: `Pattern-5 [${pat5.join(',')}] => ${action} => du doan ${pred}`,
-      detail
-    };
+    const pred = action==='BET'?last:anti;
+    return { pred, algo:'Pattern-5', conf:65,
+      ly_giai:`Pattern-5 [${pat5.join(',')}] => ${action} => ${pred}`, detail };
   }
 
-  // Streak rules
-  if (s >= 5) return { pred: anti, algo: 'Streak>=5->Nguoc', conf: 82,
-    ly_giai: `Chuoi ${lastTX} lien tiep ${s} phien >= 5 => dao sang ${anti}`, detail };
-  if (s === 4) return { pred: anti, algo: 'Streak=4->Nguoc', conf: 66,
-    ly_giai: `Chuoi ${lastTX} lien tiep 4 phien => dao sang ${anti}`, detail };
-  if (s === 3 && c5 >= 3) return { pred: last, algo: 'Streak3+Cnt5>=3->Bet', conf: 58,
-    ly_giai: `Chuoi ${lastTX} lien tiep 3, trong 5 phien co ${c5} ${lastTX} >= 3 => bet theo ${last}`, detail };
-  if (s === 2 && c5 === 3) return { pred: last, algo: 'Streak2+Cnt5=3->Bet', conf: 59,
-    ly_giai: `Chuoi ${lastTX} lien tiep 2, trong 5 phien co dung 3 ${lastTX} => bet theo ${last}`, detail };
-  if (s === 2 && c5 >= 4) return { pred: anti, algo: 'Streak2+Cnt5>=4->Nguoc', conf: 57,
-    ly_giai: `Chuoi ${lastTX} lien tiep 2, trong 5 phien co ${c5} ${lastTX} >= 4 => dao sang ${anti}`, detail };
-  if (s === 1 && c5 >= 4) return { pred: last, algo: 'Cnt5>=4->Bet', conf: 56,
-    ly_giai: `Phien cuoi don le, trong 5 phien co ${c5} ${lastTX} >= 4 => bet theo ${last}`, detail };
-  if (s === 1 && c5 <= 2) return { pred: anti, algo: 'Cnt5<=2->Nguoc', conf: 62,
-    ly_giai: `Phien cuoi don le, trong 5 phien chi co ${c5} ${lastTX} <= 2 => dao sang ${anti}`, detail };
-  if (c10 >= 6) return { pred: last, algo: 'Cnt10>=6->Bet', conf: 55,
-    ly_giai: `Trong 10 phien co ${c10} ${lastTX} >= 6 => bet theo ${last}`, detail };
+  if (s>=5) return { pred:anti, algo:'Streak>=5->Nguoc', conf:82, ly_giai:`Chuoi ${s}>=5 => dao ${anti}`, detail };
+  if (s===4) return { pred:anti, algo:'Streak=4->Nguoc', conf:66, ly_giai:`Chuoi 4 => dao ${anti}`, detail };
+  if (s===3&&c5>=3) return { pred:last, algo:'S3C5>=3->Bet', conf:58, ly_giai:`S3 C5=${c5}>=3 => bet ${last}`, detail };
+  if (s===2&&c5===3) return { pred:last, algo:'S2C5=3->Bet', conf:59, ly_giai:`S2 C5=3 => bet ${last}`, detail };
+  if (s===2&&c5>=4) return { pred:anti, algo:'S2C5>=4->Nguoc', conf:57, ly_giai:`S2 C5=${c5}>=4 => dao ${anti}`, detail };
+  if (s===1&&c5>=4) return { pred:last, algo:'C5>=4->Bet', conf:56, ly_giai:`C5=${c5}>=4 => bet ${last}`, detail };
+  if (s===1&&c5<=2) return { pred:anti, algo:'C5<=2->Nguoc', conf:62, ly_giai:`C5=${c5}<=2 => dao ${anti}`, detail };
+  if (c10>=6) return { pred:last, algo:'C10>=6->Bet', conf:55, ly_giai:`C10=${c10}>=6 => bet ${last}`, detail };
+  return { pred:anti, algo:'Nguoc cuoi (mac dinh)', conf:54, ly_giai:`Mac dinh dao ${last} => ${anti}`, detail };
+}
 
-  return { pred: anti, algo: 'Nguoc cuoi (mac dinh)', conf: 54,
-    ly_giai: `Khong co pattern ro rang, ap dung nguoc phien cuoi ${last} => ${anti}`, detail };
+// ============================================================
+// AUTO SEARCH ENGINE
+// Chay background, tim thuat toan tot nhat tren du lieu tich luy
+// Muc tieu: max_sai <= 2 tren 1000 phien gan nhat
+// Khi dat target => tu dong dung thuat toan do de du doan
+// ============================================================
+const SEARCH_TARGET_MAX_SAI = 2;
+const SEARCH_TEST_WINDOW    = 1000;
+const SEARCH_MIN_PHIEN      = 150;
+const SEARCH_INTERVAL_PHIEN = 30;
+
+let autoSearchState = {
+  running: false,
+  last_search_phien_count: 0,
+  best: null,          // ket qua tot nhat tim duoc
+  history: [],         // lich su cac lan search
+  started_at: null,
+  iterations: 0
+};
+
+// Helper: evaluate predictions
+function evalPreds(preds) {
+  const total = preds.length;
+  if (!total) return { acc:0, max_sai:0, max_dung:0, dist:{} };
+  const ok = preds.filter(p => p[0]===p[1]).length;
+  let cw=0, mw=0, cr=0, mr=0;
+  const streaks = {};
+  for (const [pred, actual] of preds) {
+    if (pred===actual) {
+      if (cw>0) { streaks[cw]=(streaks[cw]||0)+1; } cw=0; cr++; if(cr>mr)mr=cr;
+    } else { cr=0; cw++; if(cw>mw)mw=cw; }
+  }
+  if (cw>0) streaks[cw]=(streaks[cw]||0)+1;
+  return { acc: ok/total*100, max_sai: mw, max_dung: mr, dist: streaks };
+}
+
+// Helper: predict theo config bat ky
+function predictByConfig(config, w, tw) {
+  const last=w[w.length-1]; const anti=last==='Tai'?'Xiu':'Tai';
+  const wTX=w.map(x=>x==='Tai'?'T':'X');
+  const s=getStreak(wTX); const lastTX=wTX[wTX.length-1];
+  const c5=wTX.slice(-5).filter(x=>x===lastTX).length;
+  const c10=wTX.slice(-10).filter(x=>x===lastTX).length;
+  const t=config.type;
+
+  if (t==='avg_total') {
+    const {n_avg,thresh}=config;
+    if (tw.length>=n_avg) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>thresh) return 'Tai'; if (avg<thresh) return 'Xiu';
+    }
+  }
+  else if (t==='avg_count') {
+    const {n_avg,thresh,n_win,hi}=config;
+    if (tw.length>=n_avg) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>thresh) return 'Tai'; if (avg<thresh) return 'Xiu';
+    }
+    const rc=wTX.slice(-n_win);
+    if (rc.filter(x=>x==='T').length>=hi) return 'Tai';
+    if (rc.filter(x=>x==='X').length>=hi) return 'Xiu';
+  }
+  else if (t==='momentum') {
+    const {n_avg,thresh,n_short,n_long,delta}=config;
+    let avg=null,mom=null;
+    if (tw.length>=n_avg) avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+    if (tw.length>=n_long) {
+      const as=tw.slice(0,n_short).reduce((a,b)=>a+b,0)/n_short;
+      const al=tw.slice(n_short,n_long).reduce((a,b)=>a+b,0)/(n_long-n_short);
+      mom=as-al;
+    }
+    if (avg!==null&&mom!==null) {
+      if (avg>thresh&&mom>=-delta) return 'Tai';
+      if (avg<thresh&&mom<=delta)  return 'Xiu';
+      if (mom>delta)  return 'Tai';
+      if (mom<-delta) return 'Xiu';
+    } else if (avg!==null) {
+      if (avg>thresh) return 'Tai'; if (avg<thresh) return 'Xiu';
+    }
+  }
+  else if (t==='streak') {
+    const {follow_thresh,flip_thresh}=config;
+    if (s>=follow_thresh) return last;
+    if (s>=flip_thresh)   return anti;
+  }
+  else if (t==='count_tx') {
+    const {n_win,hi,lo}=config;
+    const rc=wTX.slice(-n_win);
+    const tc=rc.filter(x=>x==='T').length;
+    if (tc>=hi) return 'Tai'; if (tc<=lo) return 'Xiu';
+  }
+  else if (t==='avg_streak') {
+    const {n_avg,thresh,streak_follow,streak_flip}=config;
+    if (s>=streak_follow) return last;
+    if (s>=streak_flip)   return anti;
+    if (tw.length>=n_avg) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>thresh) return 'Tai'; if (avg<thresh) return 'Xiu';
+    }
+  }
+  else if (t==='pattern75') {
+    if (s>=6) return last;
+    const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
+    const k5=keyOf(wTX.slice(-5)); if (T5[k5]) return T5[k5]==='BET'?last:anti;
+    if (s>=5) return anti; if (s===4) return anti;
+    if (s===3&&c5>=3) return last; if (s===2&&c5===3) return last;
+    if (s===2&&c5>=4) return anti; if (s===1&&c5>=4) return last;
+    if (s===1&&c5<=2) return anti; if (c10>=6) return last;
+    return anti;
+  }
+
+  // Fallback Pattern-7+5
+  if (s>=6) return last;
+  const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
+  const k5=keyOf(wTX.slice(-5)); if (T5[k5]) return T5[k5]==='BET'?last:anti;
+  if (s>=5) return anti; if (s===4) return anti;
+  if (s===3&&c5>=3) return last; if (s===2&&c5===3) return last;
+  if (s===2&&c5>=4) return anti; if (s===1&&c5>=4) return last;
+  if (s===1&&c5<=2) return anti; if (c10>=6) return last;
+  return anti;
+}
+
+// Sinh danh sach tat ca config can test
+function generateConfigs() {
+  const cfgs = [];
+  // 1. AvgTotal
+  for (let na=5;na<=15;na++) for (let tx=80;tx<=125;tx+=5)
+    cfgs.push({type:'avg_total',n_avg:na,thresh:tx/10,name:`AvgTotal(n=${na},t=${tx/10})`});
+  // 2. AvgTotal + Count TX
+  for (let na=7;na<=12;na++) for (let tx=85;tx<=115;tx+=5) {
+    const th=tx/10;
+    for (let nw=5;nw<=13;nw++) for (let hi=Math.ceil(nw*0.6);hi<=nw;hi++)
+      cfgs.push({type:'avg_count',n_avg:na,thresh:th,n_win:nw,hi,name:`AvgCount(na=${na},t=${th},nw=${nw},hi=${hi})`});
+  }
+  // 3. Momentum
+  for (let na=7;na<=13;na++) for (let tx=86;tx<=114;tx+=4) {
+    const th=tx/10;
+    for (let ns=2;ns<=5;ns++) for (let nl=ns+3;nl<=12;nl++) for (let dx=2;dx<=15;dx+=2)
+      cfgs.push({type:'momentum',n_avg:na,thresh:th,n_short:ns,n_long:nl,delta:dx/10,name:`Mom(na=${na},t=${th},ns=${ns},nl=${nl},d=${dx/10})`});
+  }
+  // 4. Streak-based
+  for (let sf=3;sf<=8;sf++) for (let fp=2;fp<=sf-1;fp++)
+    cfgs.push({type:'streak',follow_thresh:sf,flip_thresh:fp,name:`Streak(f=${sf},p=${fp})`});
+  // 5. Count TX
+  for (let nw=5;nw<=15;nw++) for (let hi=Math.ceil(nw*0.6);hi<=nw;hi++) for (let lo=0;lo<=Math.floor(nw*0.35);lo++)
+    cfgs.push({type:'count_tx',n_win:nw,hi,lo,name:`CountTX(nw=${nw},hi=${hi},lo=${lo})`});
+  // 6. AvgTotal + Streak
+  for (let na=7;na<=12;na++) for (let tx=87;tx<=113;tx+=4) {
+    const th=tx/10;
+    for (let sf=4;sf<=8;sf++) for (let fp=2;fp<=sf-1;fp++)
+      cfgs.push({type:'avg_streak',n_avg:na,thresh:th,streak_follow:sf,streak_flip:fp,name:`AvgStreak(na=${na},t=${th},sf=${sf},fp=${fp})`});
+  }
+  // 7. Pattern-7+5 baseline
+  cfgs.push({type:'pattern75',name:'Pattern75'});
+  return cfgs;
+}
+
+// Brute-force search tren du lieu hien co
+function runAutoSearch() {
+  if (autoSearchState.running) return;
+  const n = lichSu.length;
+  if (n < SEARCH_MIN_PHIEN + WINDOW) {
+    console.log('[SEARCH] Chua du '+SEARCH_MIN_PHIEN+' phien (hien co '+n+')');
+    return;
+  }
+
+  autoSearchState.running = true;
+  autoSearchState.iterations++;
+  const iter = autoSearchState.iterations;
+  console.log('[SEARCH] Bat dau iter='+iter+' tren '+n+' phien...');
+
+  // Chay async de khong block event loop
+  setImmediate(() => {
+    try {
+      const sorted  = lichSu.slice().sort((a,b)=>a.Phien-b.Phien);
+      const results = sorted.map(x=>x.Ket_qua);
+      const totals  = sorted.map(x=>x.Tong);
+      const testN   = Math.min(SEARCH_TEST_WINDOW, n - WINDOW);
+      const startIdx = Math.max(WINDOW, n - testN);
+      const configs  = generateConfigs();
+      let best = null;
+
+      for (const cfg of configs) {
+        const preds = [];
+        for (let i=startIdx; i<n; i++) {
+          const w  = results.slice(i-WINDOW, i);
+          const tw = totals.slice(i-15, i).reverse();
+          preds.push([predictByConfig(cfg, w, tw), results[i]]);
+        }
+        const ev = evalPreds(preds);
+        const c = { ...ev, config:cfg, name:cfg.name };
+        if (!best ||
+            c.max_sai < best.max_sai ||
+            (c.max_sai===best.max_sai && c.acc>best.acc) ||
+            (c.max_sai===best.max_sai && c.acc===best.acc && c.max_dung>best.max_dung))
+          best = c;
+      }
+
+      if (!best) { autoSearchState.running=false; return; }
+      best.achieved_target = best.max_sai <= SEARCH_TARGET_MAX_SAI;
+      best.test_phien  = testN;
+      best.total_phien = n;
+      best.timestamp   = new Date().toISOString();
+      best.iteration   = iter;
+
+      const prev = autoSearchState.best;
+      if (!prev || best.max_sai<prev.max_sai || (best.max_sai===prev.max_sai && best.acc>prev.acc)) {
+        autoSearchState.best = best;
+        console.log('[SEARCH] *** NEW BEST iter='+iter+': '+best.name+
+          ' acc='+best.acc.toFixed(1)+'% max_sai='+best.max_sai+
+          ' max_dung='+best.max_dung+' target='+best.achieved_target+' ***');
+      } else {
+        console.log('[SEARCH] iter='+iter+' best='+best.name+
+          ' acc='+best.acc.toFixed(1)+'% max_sai='+best.max_sai);
+      }
+
+      autoSearchState.history.unshift({
+        iter, acc:best.acc, max_sai:best.max_sai, max_dung:best.max_dung,
+        name:best.name, achieved:best.achieved_target, ts:best.timestamp
+      });
+      if (autoSearchState.history.length>30) autoSearchState.history=autoSearchState.history.slice(0,30);
+      autoSearchState.last_search_phien_count = n;
+    } catch(e) {
+      console.error('[SEARCH ERR] '+e.message);
+    } finally {
+      autoSearchState.running = false;
+    }
+  });
+}
+
+// Trigger search khi co du phien moi
+function maybeRunSearch() {
+  const n = lichSu.length;
+  if (n < SEARCH_MIN_PHIEN + WINDOW) return;
+  if (autoSearchState.running) return;
+  if (n - autoSearchState.last_search_phien_count >= SEARCH_INTERVAL_PHIEN) {
+    runAutoSearch();
+  }
 }
 
 // ============================================================
@@ -354,6 +574,8 @@ function connectWebSocket() {
             if (predLog.length > MAX_PRED_LOG) predLog = predLog.slice(0, MAX_PRED_LOG);
             const dung = predLog.filter(p=>p.dung).length;
             console.log('[BACKFILL] '+backfilled+' predictions from history | acc='+(dung/predLog.length*100).toFixed(1)+'%');
+            // Trigger search sau khi backfill xong
+            maybeRunSearch();
           }
 
           // Tinh du doan cho phien tiep theo
@@ -414,6 +636,8 @@ function connectWebSocket() {
         }
         console.log('[NEW] Phien '+entry.Phien+': '+d1+'-'+d2+'-'+d3+'='+total+' ('+result+') | Total: '+lichSu.length);
         currentSessionId = null;
+        // Trigger search khi co phien moi
+        maybeRunSearch();
       }
     } catch(e) { console.error('[ERR] '+e.message); }
   });
@@ -557,6 +781,50 @@ app.get('/api/dudoan/stats', (req,res) => {
   });
 });
 
+// ============================================================
+// ENDPOINT: Auto Search results
+// GET /api/algo/search
+// POST /api/algo/search/run
+// ============================================================
+app.get('/api/algo/search', (req,res) => {
+  res.json({
+    status: 'ok',
+    search_state: {
+      running: autoSearchState.running,
+      iterations: autoSearchState.iterations,
+      last_search_phien_count: autoSearchState.last_search_phien_count,
+      started_at: autoSearchState.started_at,
+      total_phien_hien_co: lichSu.length,
+      target: 'max_sai <= '+SEARCH_TARGET_MAX_SAI+' tren '+SEARCH_TEST_WINDOW+' phien gan nhat',
+      search_interval: 'Moi '+SEARCH_INTERVAL_PHIEN+' phien moi'
+    },
+    best_algo: autoSearchState.best ? {
+      name: autoSearchState.best.name,
+      config: autoSearchState.best.config,
+      acc: autoSearchState.best.acc.toFixed(2)+'%',
+      max_sai: autoSearchState.best.max_sai,
+      max_dung: autoSearchState.best.max_dung,
+      dist_sai: autoSearchState.best.dist,
+      test_phien: autoSearchState.best.test_phien,
+      total_phien: autoSearchState.best.total_phien,
+      achieved_target: autoSearchState.best.achieved_target,
+      timestamp: autoSearchState.best.timestamp,
+      iteration: autoSearchState.best.iteration
+    } : null,
+    history: autoSearchState.history,
+    id: '@tiendataox'
+  });
+});
+
+app.post('/api/algo/search/run', (req,res) => {
+  if (autoSearchState.running) {
+    return res.json({ status: 'busy', message: 'Dang chay search, vui long cho...' });
+  }
+  autoSearchState.last_search_phien_count = 0; // force run
+  runAutoSearch();
+  res.json({ status: 'ok', message: 'Da bat dau search, xem ket qua tai /api/algo/search' });
+});
+
 app.get('/', (req,res) => res.json({
   message: 'LC79 Data API - Soi Cau Tai Xiu (Pattern-7+5, 71.34%)',
   endpoints: [
@@ -566,12 +834,15 @@ app.get('/', (req,res) => res.json({
     'GET /api/stats               — Thong ke Tai/Xiu',
     'GET /api/dudoan              — Du doan phien tiep theo',
     'GET /api/lichsu/dudoan?limit=N&page=N — Lich su du doan dung/sai',
-    'GET /api/dudoan/stats        — Thong ke chi tiet du doan theo algo'
+    'GET /api/dudoan/stats        — Thong ke chi tiet du doan theo algo',
+    'GET /api/algo/search         — Ket qua tim thuat toan tu dong',
+    'POST /api/algo/search/run    — Chay search ngay lap tuc'
   ],
   id: '@tiendataox'
 }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('LC79 API running on port '+PORT);
+  autoSearchState.started_at = new Date().toISOString();
   connectWebSocket();
 });
