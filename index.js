@@ -236,7 +236,42 @@ function connectWebSocket() {
         if (newEntries.length > 0) {
           lichSu = [...newEntries,...lichSu].sort((a,b)=>b.Phien-a.Phien).slice(0,MAX_HISTORY);
           console.log('[HISTORY] Loaded: '+lichSu.length+' sessions');
-          // Tinh du doan sau khi load history
+
+          // Backfill predLog tu lich su co san
+          // Sap xep cu -> moi de chay sliding window
+          if (lichSu.length >= WINDOW + 1 && predLog.length === 0) {
+            const sorted = lichSu.slice().sort((a,b) => a.Phien - b.Phien);
+            let backfilled = 0;
+            for (let i = WINDOW; i < sorted.length; i++) {
+              const w = sorted.slice(i - WINDOW, i).map(x => x.Ket_qua);
+              const pred = runPredict(w);
+              if (!pred) continue;
+              const actual = sorted[i].Ket_qua;
+              const correct = pred.pred === actual;
+              predLog.push({
+                phien: sorted[i].Phien,
+                du_doan: pred.pred,
+                ket_qua: actual,
+                dung: correct,
+                algo: pred.algo,
+                conf: pred.conf,
+                ly_giai: pred.ly_giai || '',
+                phan_tich: pred.detail || null,
+                xuc_xac: sorted[i].Xuc_xac_1+'-'+sorted[i].Xuc_xac_2+'-'+sorted[i].Xuc_xac_3,
+                tong: sorted[i].Tong,
+                time: sorted[i].time || new Date().toISOString(),
+                backfill: true
+              });
+              backfilled++;
+            }
+            // Dao nguoc lai: moi nhat o dau
+            predLog.reverse();
+            if (predLog.length > MAX_PRED_LOG) predLog = predLog.slice(0, MAX_PRED_LOG);
+            const dung = predLog.filter(p=>p.dung).length;
+            console.log('[BACKFILL] '+backfilled+' predictions from history | acc='+(dung/predLog.length*100).toFixed(1)+'%');
+          }
+
+          // Tinh du doan cho phien tiep theo
           if (lichSu.length >= WINDOW && !pendingPred) {
             const w = lichSu.slice(0, WINDOW).map(x => x.Ket_qua).reverse();
             pendingPred = runPredict(w);
