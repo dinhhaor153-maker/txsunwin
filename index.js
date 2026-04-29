@@ -454,6 +454,94 @@ function predictByConfig(config, w, tw) {
     if (votes>0) return 'Tai';
     if (votes<0) return 'Xiu';
   }
+  // --- Pattern N phien (4,5,6 phien) ---
+  else if (t==='patN') {
+    const {pat,action}=config;
+    const n=pat.length;
+    const lastN=wTX.slice(-n).join('');
+    if (lastN===pat) return action==='BET'?last:anti;
+  }
+  // --- So sanh nua dau vs nua cuoi window 21 ---
+  else if (t==='half_compare') {
+    const {action_more_tai_recent}=config;
+    const first10=wTX.slice(0,10);  // cu hon
+    const last10=wTX.slice(11,21);  // moi hon
+    const tFirst=first10.filter(x=>x==='T').length;
+    const tLast=last10.filter(x=>x==='T').length;
+    if (tLast>tFirst) return action_more_tai_recent==='follow'?'Tai':'Xiu';
+    if (tLast<tFirst) return action_more_tai_recent==='follow'?'Xiu':'Tai';
+  }
+  // --- Tong diem chan/le ---
+  else if (t==='odd_even') {
+    const {action_odd,action_even}=config;
+    if (tw.length>=1) {
+      const lastTot=tw[0];
+      if (lastTot%2===0) return action_even==='Tai'?'Tai':'Xiu';
+      else return action_odd==='Tai'?'Tai':'Xiu';
+    }
+  }
+  // --- Avg + Variance ket hop ---
+  else if (t==='avg_var') {
+    const {n_avg,thresh,n_var,hi_var,trust_action}=config;
+    if (tw.length>=Math.max(n_avg,n_var)) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      const mean_v=tw.slice(0,n_var).reduce((a,b)=>a+b,0)/n_var;
+      const variance=tw.slice(0,n_var).reduce((a,b)=>a+(b-mean_v)*(b-mean_v),0)/n_var;
+      const avgPred=avg>thresh?'Tai':'Xiu';
+      if (variance<=hi_var) return avgPred; // bien dong thap => tin tuong avg
+      // bien dong cao => khong chac, dung nguoc
+      return trust_action==='follow'?avgPred:(avgPred==='Tai'?'Xiu':'Tai');
+    }
+  }
+  // --- Multi-window vote (window 7, 14, 21 bau chon) ---
+  else if (t==='multi_window_vote') {
+    const {thresh}=config;
+    let votes=0;
+    // Window 7
+    const t7=wTX.slice(-7).filter(x=>x==='T').length;
+    if (t7/7>thresh) votes++; else if (t7/7<1-thresh) votes--;
+    // Window 14
+    const t14=wTX.slice(-14).filter(x=>x==='T').length;
+    if (t14/14>thresh) votes++; else if (t14/14<1-thresh) votes--;
+    // Window 21
+    const t21=wTX.filter(x=>x==='T').length;
+    if (t21/21>thresh) votes++; else if (t21/21<1-thresh) votes--;
+    if (votes>0) return 'Tai';
+    if (votes<0) return 'Xiu';
+  }
+  // --- Cau 1-3 (1 roi 3 xen ke) ---
+  else if (t==='cau_13') {
+    const rc=wTX.slice(-8);
+    if (rc.length>=8) {
+      let groups=[]; let cur=rc[0]; let cnt=1;
+      for (let i=1;i<rc.length;i++) {
+        if (rc[i]===cur) cnt++;
+        else { groups.push({v:cur,c:cnt}); cur=rc[i]; cnt=1; }
+      }
+      groups.push({v:cur,c:cnt});
+      if (groups.length>=3) {
+        const g=groups.slice(-3);
+        if ((g[0].c===1&&g[1].c===3)||(g[0].c===3&&g[1].c===1)) {
+          // Dang trong pattern 1-3
+          const expected=g[1].c===3?1:3;
+          if (g[2].c<expected) return g[2].v==='T'?'Tai':'Xiu'; // tiep tuc chuoi hien tai
+          else return g[2].v==='T'?'Xiu':'Tai'; // doi sang loai khac
+        }
+      }
+    }
+  }
+  // --- Sliding window acceleration (toc do thay doi) ---
+  else if (t==='acceleration') {
+    const {n1,n2,n3}=config; // 3 window ngan dan
+    if (tw.length>=n1) {
+      const a1=tw.slice(0,n3).reduce((a,b)=>a+b,0)/n3;
+      const a2=tw.slice(n3,n3+n2).reduce((a,b)=>a+b,0)/n2;
+      const a3=tw.slice(n3+n2,n1).reduce((a,b)=>a+b,0)/(n1-n3-n2);
+      // Gia toc: a1>a2>a3 => dang tang manh => Tai
+      if (a1>a2&&a2>a3) return 'Tai';
+      if (a1<a2&&a2<a3) return 'Xiu';
+    }
+  }
   else if (t==='pattern75') {
     if (s>=6) return last;
     const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
@@ -581,12 +669,50 @@ function generateConfigs() {
         name:`TripleAND(na=${na},t=${th},sm=${sm},cn=${cn},ch=${ch})`});
   }
 
-  // 19. Pattern-7+5 baseline
+  // 20. Pattern N phien (4 phien = 16 combo, 5 phien = 32 combo)
+  const genPats=(n)=>{const r=[];const f=(s)=>{if(s.length===n){r.push(s);return;}f(s+'T');f(s+'X');};f('');return r;};
+  for (const pat of genPats(4)) {
+    cfgs.push({type:'patN',pat,action:'BET',  name:`Pat4(${pat}->BET)`});
+    cfgs.push({type:'patN',pat,action:'NGUOC',name:`Pat4(${pat}->NGUOC)`});
+  }
+  for (const pat of genPats(5)) {
+    cfgs.push({type:'patN',pat,action:'BET',  name:`Pat5(${pat}->BET)`});
+    cfgs.push({type:'patN',pat,action:'NGUOC',name:`Pat5(${pat}->NGUOC)`});
+  }
+
+  // 21. So sanh nua dau vs nua cuoi window 21
+  cfgs.push({type:'half_compare',action_more_tai_recent:'follow',name:'HalfCompare(follow)'});
+  cfgs.push({type:'half_compare',action_more_tai_recent:'anti',  name:'HalfCompare(anti)'});
+
+  // 22. Tong diem chan/le
+  cfgs.push({type:'odd_even',action_odd:'Tai', action_even:'Xiu',name:'OddEven(odd=T)'});
+  cfgs.push({type:'odd_even',action_odd:'Xiu', action_even:'Tai',name:'OddEven(odd=X)'});
+
+  // 23. Avg + Variance ket hop
+  for (let na=8;na<=12;na++) for (let tx=88;tx<=112;tx+=4) {
+    const th=tx/10;
+    for (let nv=5;nv<=10;nv++) for (let hv=3;hv<=8;hv++) {
+      cfgs.push({type:'avg_var',n_avg:na,thresh:th,n_var:nv,hi_var:hv,trust_action:'follow',name:`AvgVar(na=${na},t=${th},nv=${nv},hv=${hv},follow)`});
+      cfgs.push({type:'avg_var',n_avg:na,thresh:th,n_var:nv,hi_var:hv,trust_action:'anti',  name:`AvgVar(na=${na},t=${th},nv=${nv},hv=${hv},anti)`});
+    }
+  }
+
+  // 24. Multi-window vote (7, 14, 21 bau chon)
+  for (let tx=52;tx<=65;tx+=3)
+    cfgs.push({type:'multi_window_vote',thresh:tx/100,name:`MultiVote(t=${tx/100})`});
+
+  // 25. Cau 1-3
+  cfgs.push({type:'cau_13',name:'Cau13'});
+
+  // 26. Acceleration (toc do thay doi tong diem)
+  for (let n3=2;n3<=4;n3++) for (let n2=2;n2<=4;n2++) for (let n1=n3+n2+2;n1<=12;n1++)
+    cfgs.push({type:'acceleration',n1,n2,n3,name:`Accel(n1=${n1},n2=${n2},n3=${n3})`});
+
+  // 27. Pattern-7+5 baseline
   cfgs.push({type:'pattern75',name:'Pattern75'});
 
   return cfgs;
-}
-// Brute-force search tren du lieu hien co
+}// Brute-force search tren du lieu hien co
 function runAutoSearch() {
   if (autoSearchState.running) return;
   const n = lichSu.length;
