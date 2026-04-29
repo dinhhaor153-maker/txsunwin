@@ -103,29 +103,13 @@ function updateRecentPreds(pred, actual) {
 function getCutLossOverride(normalPred) {
   if (recentPreds.length < 2) return null;
 
-  // Check 2 phien: sai lien tiep cung du doan 1 loai => dao
+  // Check 2 phien: sai lien tiep 2 lan => dao phien sai gan nhat
   const last2 = recentPreds.slice(0, 2);
-  const allWrong2 = last2.every(p => !p.correct);
-  const samePred2 = last2.every(p => p.pred === last2[0].pred);
-  if (allWrong2 && samePred2) {
-    const wrongPred = last2[0].pred;
-    const override = wrongPred === 'Tai' ? 'Xiu' : 'Tai';
-    // Chi cut-loss neu normalPred cung la wrongPred (tranh cut-loss khi algo da tu dao)
-    if (!normalPred || normalPred === wrongPred) {
-      return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
-        ly_giai: `Sai lien tiep 2 lan du doan ${wrongPred} => dao sang ${override}` };
-    }
-  }
-
-  // Check 3 phien: sai lien tiep 3 lan bat ke du doan gi => dao phien sai gan nhat
-  if (recentPreds.length >= 3) {
-    const last3 = recentPreds.slice(0, 3);
-    if (last3.every(p => !p.correct)) {
-      const lastWrongPred = last3[0].pred;
-      const override = lastWrongPred === 'Tai' ? 'Xiu' : 'Tai';
-      return { pred: override, algo: 'CutLoss-3->Dao', conf: 70,
-        ly_giai: `Sai lien tiep 3 lan => dao sang ${override} bat ke pattern` };
-    }
+  if (last2.every(p => !p.correct)) {
+    const lastWrongPred = last2[0].pred;
+    const override = lastWrongPred === 'Tai' ? 'Xiu' : 'Tai';
+    return { pred: override, algo: 'CutLoss-2->Dao', conf: 68,
+      ly_giai: `Sai lien tiep 2 lan (${last2.map(p=>p.pred).join(',')}) => dao sang ${override}` };
   }
 
   return null;
