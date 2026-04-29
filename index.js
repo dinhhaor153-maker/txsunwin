@@ -114,37 +114,76 @@ function runPredict(w) {
   // Chuyen sang T/X de tra bang
   const wTX = w.map(x => x === 'Tai' ? 'T' : 'X');
   const lastTX = wTX[wTX.length - 1];
-  const antiTX = lastTX === 'T' ? 'X' : 'T';
+
+  // Tinh cac chi so phan tich
+  const s    = getStreak(wTX);
+  const c5   = wTX.slice(-5).filter(x => x === lastTX).length;
+  const c10  = wTX.slice(-10).filter(x => x === lastTX).length;
+  const c21  = wTX.filter(x => x === 'T').length;
+  const pat7 = wTX.slice(-7);
+  const pat5 = wTX.slice(-5);
+  const k7   = keyOf(pat7);
+  const k5   = keyOf(pat5);
+
+  // Phan tich chi tiet de tra ve
+  const detail = {
+    window_7:  pat7,
+    window_5:  pat5,
+    key_7:     k7,
+    key_5:     k5,
+    streak_hien_tai: s,
+    loai_streak: lastTX,
+    dem_5_phien: { [lastTX]: c5, [lastTX==='T'?'X':'T']: 5-c5 },
+    dem_10_phien: { T: wTX.slice(-10).filter(x=>x==='T').length, X: wTX.slice(-10).filter(x=>x==='X').length },
+    dem_21_phien: { T: c21, X: 21-c21 },
+    hit_table7: !!T7[k7],
+    hit_table5: !!T5[k5],
+    action_table7: T7[k7] || null,
+    action_table5: T5[k5] || null
+  };
 
   // Table 7
-  const k7 = keyOf(wTX.slice(-7));
   if (T7[k7]) {
     const action = T7[k7];
-    return { pred: action === 'BET' ? last : anti, algo: 'Pattern-7', conf: 72 };
+    const pred = action === 'BET' ? last : anti;
+    return {
+      pred, algo: 'Pattern-7', conf: 72,
+      ly_giai: `Pattern-7 [${pat7.join(',')}] => ${action} => du doan ${pred}`,
+      detail
+    };
   }
 
   // Table 5
-  const k5 = keyOf(wTX.slice(-5));
   if (T5[k5]) {
     const action = T5[k5];
-    return { pred: action === 'BET' ? last : anti, algo: 'Pattern-5', conf: 65 };
+    const pred = action === 'BET' ? last : anti;
+    return {
+      pred, algo: 'Pattern-5', conf: 65,
+      ly_giai: `Pattern-5 [${pat5.join(',')}] => ${action} => du doan ${pred}`,
+      detail
+    };
   }
 
   // Streak rules
-  const s = getStreak(wTX);
-  const c5 = wTX.slice(-5).filter(x => x === lastTX).length;
-  const c10 = wTX.slice(-10).filter(x => x === lastTX).length;
+  if (s >= 5) return { pred: anti, algo: 'Streak>=5->Nguoc', conf: 82,
+    ly_giai: `Chuoi ${lastTX} lien tiep ${s} phien >= 5 => dao sang ${anti}`, detail };
+  if (s === 4) return { pred: anti, algo: 'Streak=4->Nguoc', conf: 66,
+    ly_giai: `Chuoi ${lastTX} lien tiep 4 phien => dao sang ${anti}`, detail };
+  if (s === 3 && c5 >= 3) return { pred: last, algo: 'Streak3+Cnt5>=3->Bet', conf: 58,
+    ly_giai: `Chuoi ${lastTX} lien tiep 3, trong 5 phien co ${c5} ${lastTX} >= 3 => bet theo ${last}`, detail };
+  if (s === 2 && c5 === 3) return { pred: last, algo: 'Streak2+Cnt5=3->Bet', conf: 59,
+    ly_giai: `Chuoi ${lastTX} lien tiep 2, trong 5 phien co dung 3 ${lastTX} => bet theo ${last}`, detail };
+  if (s === 2 && c5 >= 4) return { pred: anti, algo: 'Streak2+Cnt5>=4->Nguoc', conf: 57,
+    ly_giai: `Chuoi ${lastTX} lien tiep 2, trong 5 phien co ${c5} ${lastTX} >= 4 => dao sang ${anti}`, detail };
+  if (s === 1 && c5 >= 4) return { pred: last, algo: 'Cnt5>=4->Bet', conf: 56,
+    ly_giai: `Phien cuoi don le, trong 5 phien co ${c5} ${lastTX} >= 4 => bet theo ${last}`, detail };
+  if (s === 1 && c5 <= 2) return { pred: anti, algo: 'Cnt5<=2->Nguoc', conf: 62,
+    ly_giai: `Phien cuoi don le, trong 5 phien chi co ${c5} ${lastTX} <= 2 => dao sang ${anti}`, detail };
+  if (c10 >= 6) return { pred: last, algo: 'Cnt10>=6->Bet', conf: 55,
+    ly_giai: `Trong 10 phien co ${c10} ${lastTX} >= 6 => bet theo ${last}`, detail };
 
-  if (s >= 5) return { pred: anti, algo: 'Streak>=5->Nguoc', conf: 82 };
-  if (s === 4) return { pred: anti, algo: 'Streak=4->Nguoc', conf: 66 };
-  if (s === 3 && c5 >= 3) return { pred: last, algo: 'Streak3+Cnt5>=3->Bet', conf: 58 };
-  if (s === 2 && c5 === 3) return { pred: last, algo: 'Streak2+Cnt5=3->Bet', conf: 59 };
-  if (s === 2 && c5 >= 4) return { pred: anti, algo: 'Streak2+Cnt5>=4->Nguoc', conf: 57 };
-  if (s === 1 && c5 >= 4) return { pred: last, algo: 'Cnt5>=4->Bet', conf: 56 };
-  if (s === 1 && c5 <= 2) return { pred: anti, algo: 'Cnt5<=2->Nguoc', conf: 62 };
-  if (c10 >= 6) return { pred: last, algo: 'Cnt10>=6->Bet', conf: 55 };
-
-  return { pred: anti, algo: 'Nguoc cuoi (mac dinh)', conf: 54 };
+  return { pred: anti, algo: 'Nguoc cuoi (mac dinh)', conf: 54,
+    ly_giai: `Khong co pattern ro rang, ap dung nguoc phien cuoi ${last} => ${anti}`, detail };
 }
 
 // ============================================================
@@ -164,6 +203,8 @@ const PING_INTERVAL = 15000;
 
 const initialMessages = [
   [1,"MiniGame","GM_apivopnha","WangLin",{"info":"{\"ipAddress\":\"14.249.227.107\",\"wsToken\":\"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJnZW5kZXIiOjAsImNhblZpZXdTdGF0IjpmYWxzZSwiZGlzcGxheU5hbWUiOiI5ODE5YW5zc3MiLCJib3QiOjAsImlzTWVyY2hhbnQiOmZhbHNlLCJ2ZXJpZmllZEJhbmtBY2NvdW50IjpmYWxzZSwicGxheUV2ZW50TG9iYnkiOmZhbHNlLCJjdXN0b21lcklkIjozMjMyODExNTEsImFmZklkIjoic3VuLndpbiIsImJhbm5lZCI6ZmFsc2UsImJyYW5kIjoiZ2VtIiwidGltZXN0YW1wIjoxNzYzMDMyOTI4NzcwLCJsb2NrR2FtZXMiOltdLCJhbW91bnQiOjAsImxvY2tDaGF0IjpmYWxzZSwicGhvbmVWZXJpZmllZCI6ZmFsc2UsImlwQWRkcmVzcyI6IjE0LjI0OS4yMjcuMTA3IiwibXV0ZSI6ZmFsc2UsImF2YXRhciI6Imh0dHBzOi8vaW1hZ2VzLnN3aW5zaG9wLm5ldC9pbWFnZXMvYXZhdGFyL2F2YXRhcl8wNS5wbmciLCJwbGF0Zm9ybUlkIjo0LCJ1c2VySWQiOiI4ODM4NTMzZS1kZTQzLTRiOGQtOTUwMy02MjFmNDA1MDUzNGUiLCJyZWdUaW1lIjoxNzYxNjMyMzAwNTc2LCJwaG9uZSI6IiIsImRlcG9zaXQiOmZhbHNlLCJ1c2VybmFtZSI6IkdNX2FwaXZvcG5oYSJ9.guH6ztJSPXUL1cU8QdMz8O1Sdy_SbxjSM-CDzWPTr-0\",\"locale\":\"vi\",\"userId\":\"8838533e-de43-4b8d-9503-621f4050534e\",\"username\":\"GM_apivopnha\",\"timestamp\":1763032928770,\"refreshToken\":\"e576b43a64e84f789548bfc7c4c8d1e5.7d4244a361e345908af95ee2e8ab2895\"}","signature":"45EF4B318C883862C36E1B189A1DF5465EBB60CB602BA05FAD8FCBFCD6E0DA8CB3CE65333EDD79A2BB4ABFCE326ED5525C7D971D9DEDB5A17A72764287FFE6F62CBC2DF8A04CD8EFF8D0D5AE27046947ADE45E62E644111EFDE96A74FEC635A97861A425FF2B5732D74F41176703CA10CFEED67D0745FF15EAC1065E1C8BCBFA"}],
+  // Request lich su nhieu nhat co the (5000 phien)
+  [6,"MiniGame","taixiuPlugin",{cmd:1005, count:5000}],
   [6,"MiniGame","taixiuPlugin",{cmd:1005}],
   [6,"MiniGame","lobbyPlugin",{cmd:10001}]
 ];
@@ -222,6 +263,8 @@ function connectWebSocket() {
               dung: correct,
               algo: pendingPred.algo,
               conf: pendingPred.conf,
+              ly_giai: pendingPred.ly_giai || '',
+              phan_tich: pendingPred.detail || null,
               xuc_xac: d1+'-'+d2+'-'+d3,
               tong: total,
               time: new Date().toISOString()
@@ -298,6 +341,8 @@ app.get('/api/dudoan', (req,res) => {
     du_doan: result.pred,
     algo: result.algo,
     do_tin_cay: result.conf+'%',
+    ly_giai: result.ly_giai,
+    phan_tich: result.detail,
     phien_moi_nhat: latestSession.Phien,
     ket_qua_moi_nhat: latestSession.Ket_qua,
     window_21: w,
