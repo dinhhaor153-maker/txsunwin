@@ -155,6 +155,28 @@ function runPredict(w, recentTotals, recentPredResults) {
   };
 
   // ── UU TIEN 1: Dung best algo tu auto-search (neu dat target max_sai<=2) ──
+  // Kiem tra performance thuc te: neu dang sai nhieu tren 30 phien gan nhat thi fallback
+  if (autoSearchState && autoSearchState.best && autoSearchState.best.achieved_target) {
+    // Kiem tra performance thuc te cua best algo tren 30 phien gan nhat trong predLog
+    let realOk=0, realTotal=0, realMaxSai=0, realCur=0;
+    const recentLog = predLog.filter(p => p.algo && p.algo.startsWith('AutoBest:')).slice(0,30);
+    if (recentLog.length >= 10) {
+      for (const p of recentLog) {
+        realTotal++;
+        if (p.dung) { realOk++; if(realCur>realMaxSai)realMaxSai=realCur; realCur=0; }
+        else realCur++;
+      }
+      if (realCur>realMaxSai) realMaxSai=realCur;
+      const realAcc = realOk/realTotal*100;
+      // Neu thuc te: acc < 45% hoac max_sai > 5 => fallback, reset best
+      if (realAcc < 45 || realMaxSai > 5) {
+        console.log('[SEARCH] Best algo performance toi: acc='+realAcc.toFixed(1)+'% max_sai='+realMaxSai+' => fallback + reset');
+        autoSearchState.best = null; // reset de search lai
+        autoSearchState.last_search_phien_count = 0; // force search lai ngay
+      }
+    }
+  }
+
   if (autoSearchState && autoSearchState.best && autoSearchState.best.achieved_target) {
     const tw = recentTotals ? recentTotals.slice(0,15) : [];
     const pred = predictByConfig(autoSearchState.best.config, w, tw);
