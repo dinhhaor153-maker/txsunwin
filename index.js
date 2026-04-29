@@ -248,6 +248,7 @@ function predictByConfig(config, w, tw) {
   const s=getStreak(wTX); const lastTX=wTX[wTX.length-1];
   const c5=wTX.slice(-5).filter(x=>x===lastTX).length;
   const c10=wTX.slice(-10).filter(x=>x===lastTX).length;
+  const c21=wTX.filter(x=>x==='T').length;
   const t=config.type;
 
   if (t==='avg_total') {
