@@ -388,6 +388,72 @@ function predictByConfig(config, w, tw) {
       else return action_lo==='Tai'?'Tai':'Xiu';
     }
   }
+  // --- Mean reversion: tong cao thi phien sau thap va nguoc lai ---
+  else if (t==='mean_revert') {
+    const {n_avg,hi_thresh,lo_thresh}=config;
+    if (tw.length>=1) {
+      const lastTot=tw[0]; // tong phien vua xong
+      if (lastTot>hi_thresh) return 'Xiu'; // tong cao => phien sau thap
+      if (lastTot<lo_thresh) return 'Tai'; // tong thap => phien sau cao
+    }
+    if (tw.length>=n_avg) {
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>hi_thresh) return 'Xiu';
+      if (avg<lo_thresh) return 'Tai';
+    }
+  }
+  // --- Weighted avg (phien gan hon trong so cao hon) ---
+  else if (t==='weighted_avg') {
+    const {n_avg,thresh}=config;
+    if (tw.length>=n_avg) {
+      let wsum=0, wtot=0;
+      for (let i=0;i<n_avg;i++) { const w=n_avg-i; wsum+=tw[i]*w; wtot+=w; }
+      const wavg=wsum/wtot;
+      if (wavg>thresh) return 'Tai';
+      if (wavg<thresh) return 'Xiu';
+    }
+  }
+  // --- Pattern 3 phien (8 combo T/X) ---
+  else if (t==='pat3') {
+    const {pat,action}=config; // pat = 'TTT','TTX','TXT','TXX','XTT','XTX','XXT','XXX'
+    const last3=wTX.slice(-3).join('');
+    if (last3===pat) return action==='BET'?last:anti;
+  }
+  // --- Cau 2-2 (2 roi 2 xen ke) ---
+  else if (t==='cau_22') {
+    const rc=wTX.slice(-8);
+    if (rc.length>=8) {
+      // Kiem tra pattern TTXX hoac XXTT lap lai
+      const p1=rc.slice(0,4).join(''); const p2=rc.slice(4,8).join('');
+      if ((p1==='TTXX'&&p2==='TTXX')||(p1==='XXTT'&&p2==='XXTT')) return last; // tiep tuc
+      if ((p1==='TTXX'&&p2==='XXTT')||(p1==='XXTT'&&p2==='TTXX')) return anti; // doi
+    }
+  }
+  // --- Dao sau chuoi dung dai (dang dung nhieu => sap sai) ---
+  else if (t==='flip_after_win') {
+    const {win_thresh}=config;
+    let curRight=0;
+    for (const p of predLog) { if (p.dung) curRight++; else break; }
+    if (curRight>=win_thresh) return anti; // dang dung nhieu => dao
+  }
+  // --- Ket hop 3 dieu kien (avg + streak + count) ---
+  else if (t==='triple_and') {
+    const {n_avg,thresh,streak_min,count_n,count_hi}=config;
+    let votes=0, total=0;
+    if (tw.length>=n_avg) {
+      total++;
+      const avg=tw.slice(0,n_avg).reduce((a,b)=>a+b,0)/n_avg;
+      if (avg>thresh) votes++; else if (avg<thresh) votes--;
+    }
+    total++;
+    if (s>=streak_min) { if (last==='Tai') votes++; else votes--; }
+    const rc=wTX.slice(-count_n);
+    total++;
+    const tc=rc.filter(x=>x==='T').length;
+    if (tc>=count_hi) votes++; else if (tc<=count_n-count_hi) votes--;
+    if (votes>0) return 'Tai';
+    if (votes<0) return 'Xiu';
+  }
   else if (t==='pattern75') {
     if (s>=6) return last;
     const k7=keyOf(wTX.slice(-7)); if (T7[k7]) return T7[k7]==='BET'?last:anti;
@@ -485,12 +551,41 @@ function generateConfigs() {
         name:`ComboAND(avg_na=${na}_t=${th},cnt_nw=${nw}_hi=${hi})`});
   }
 
-  // 13. Pattern-7+5 baseline
+  // 13. Mean reversion (tong cao => phien sau thap)
+  for (let hi=12;hi<=16;hi++) for (let lo=6;lo<=9;lo++) for (let na=3;na<=8;na++)
+    cfgs.push({type:'mean_revert',n_avg:na,hi_thresh:hi,lo_thresh:lo,name:`MeanRevert(hi>${hi},lo<${lo},n=${na})`});
+
+  // 14. Weighted avg (phien gan trong so cao hon)
+  for (let na=5;na<=15;na++) for (let tx=80;tx<=125;tx+=5)
+    cfgs.push({type:'weighted_avg',n_avg:na,thresh:tx/10,name:`WeightedAvg(n=${na},t=${tx/10})`});
+
+  // 15. Pattern 3 phien (8 combo)
+  const pat3list=['TTT','TTX','TXT','TXX','XTT','XTX','XXT','XXX'];
+  for (const pat of pat3list) {
+    cfgs.push({type:'pat3',pat,action:'BET', name:`Pat3(${pat}->BET)`});
+    cfgs.push({type:'pat3',pat,action:'NGUOC',name:`Pat3(${pat}->NGUOC)`});
+  }
+
+  // 16. Cau 2-2
+  cfgs.push({type:'cau_22',name:'Cau22'});
+
+  // 17. Dao sau chuoi dung dai
+  for (let wt=3;wt<=8;wt++)
+    cfgs.push({type:'flip_after_win',win_thresh:wt,name:`FlipAfterWin(wt=${wt})`});
+
+  // 18. Triple AND (avg + streak + count)
+  for (let na=8;na<=12;na++) for (let tx=88;tx<=112;tx+=4) {
+    const th=tx/10;
+    for (let sm=2;sm<=5;sm++) for (let cn=7;cn<=11;cn++) for (let ch=Math.ceil(cn*0.6);ch<=cn;ch++)
+      cfgs.push({type:'triple_and',n_avg:na,thresh:th,streak_min:sm,count_n:cn,count_hi:ch,
+        name:`TripleAND(na=${na},t=${th},sm=${sm},cn=${cn},ch=${ch})`});
+  }
+
+  // 19. Pattern-7+5 baseline
   cfgs.push({type:'pattern75',name:'Pattern75'});
 
   return cfgs;
 }
-
 // Brute-force search tren du lieu hien co
 function runAutoSearch() {
   if (autoSearchState.running) return;
