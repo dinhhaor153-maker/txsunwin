@@ -239,6 +239,7 @@ const WEBSOCKET_URL = "wss://websocket.azhkthg1.net/websocket?token=eyJ0eXAiOiJK
 const WS_HEADERS = { "User-Agent":"Mozilla/5.0","Origin":"https://play.sun.win" };
 const RECONNECT_DELAY = 2500;
 const PING_INTERVAL = 15000;
+let lastKnownPhien = null; // phien cuoi cung da xu ly thanh cong
 
 const initialMessages = [
   [1,"MiniGame","GM_apivopnha","WangLin",{"info":"{\"ipAddress\":\"14.249.227.107\",\"wsToken\":\"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJnZW5kZXIiOjAsImNhblZpZXdTdGF0IjpmYWxzZSwiZGlzcGxheU5hbWUiOiI5ODE5YW5zc3MiLCJib3QiOjAsImlzTWVyY2hhbnQiOmZhbHNlLCJ2ZXJpZmllZEJhbmtBY2NvdW50IjpmYWxzZSwicGxheUV2ZW50TG9iYnkiOmZhbHNlLCJjdXN0b21lcklkIjozMjMyODExNTEsImFmZklkIjoic3VuLndpbiIsImJhbm5lZCI6ZmFsc2UsImJyYW5kIjoiZ2VtIiwidGltZXN0YW1wIjoxNzYzMDMyOTI4NzcwLCJsb2NrR2FtZXMiOltdLCJhbW91bnQiOjAsImxvY2tDaGF0IjpmYWxzZSwicGhvbmVWZXJpZmllZCI6ZmFsc2UsImlwQWRkcmVzcyI6IjE0LjI0OS4yMjcuMTA3IiwibXV0ZSI6ZmFsc2UsImF2YXRhciI6Imh0dHBzOi8vaW1hZ2VzLnN3aW5zaG9wLm5ldC9pbWFnZXMvYXZhdGFyL2F2YXRhcl8wNS5wbmciLCJwbGF0Zm9ybUlkIjo0LCJ1c2VySWQiOiI4ODM4NTMzZS1kZTQzLTRiOGQtOTUwMy02MjFmNDA1MDUzNGUiLCJyZWdUaW1lIjoxNzYxNjMyMzAwNTc2LCJwaG9uZSI6IiIsImRlcG9zaXQiOmZhbHNlLCJ1c2VybmFtZSI6IkdNX2FwaXZvcG5oYSJ9.guH6ztJSPXUL1cU8QdMz8O1Sdy_SbxjSM-CDzWPTr-0\",\"locale\":\"vi\",\"userId\":\"8838533e-de43-4b8d-9503-621f4050534e\",\"username\":\"GM_apivopnha\",\"timestamp\":1763032928770,\"refreshToken\":\"e576b43a64e84f789548bfc7c4c8d1e5.7d4244a361e345908af95ee2e8ab2895\"}","signature":"45EF4B318C883862C36E1B189A1DF5465EBB60CB602BA05FAD8FCBFCD6E0DA8CB3CE65333EDD79A2BB4ABFCE326ED5525C7D971D9DEDB5A17A72764287FFE6F62CBC2DF8A04CD8EFF8D0D5AE27046947ADE45E62E644111EFDE96A74FEC635A97861A425FF2B5732D74F41176703CA10CFEED67D0745FF15EAC1065E1C8BCBFA"}],
@@ -275,6 +276,48 @@ function connectWebSocket() {
         if (newEntries.length > 0) {
           lichSu = [...newEntries,...lichSu].sort((a,b)=>b.Phien-a.Phien).slice(0,MAX_HISTORY);
           console.log('[HISTORY] Loaded: '+lichSu.length+' sessions');
+
+          // Kiem tra gap phien bi mat khi reconnect
+          if (lastKnownPhien && lichSu.length > 0) {
+            const newestInHistory = lichSu[0].Phien;
+            const gap = newestInHistory - lastKnownPhien;
+            if (gap > 1) {
+              console.log('[GAP] Phat hien mat '+gap+' phien ('+lastKnownPhien+' -> '+newestInHistory+'), dang xu ly...');
+              // Xu ly cac phien bi mat: chay sliding window cho tung phien trong gap
+              const sorted = lichSu.slice().sort((a,b) => a.Phien - b.Phien);
+              const missedEntries = sorted.filter(e => e.Phien > lastKnownPhien && e.Phien <= newestInHistory);
+              for (const missed of missedEntries) {
+                const idx = sorted.findIndex(e => e.Phien === missed.Phien);
+                if (idx < WINDOW) continue;
+                const w = sorted.slice(idx - WINDOW, idx).map(x => x.Ket_qua);
+                const pred = runPredict(w);
+                if (!pred) continue;
+                const actual = missed.Ket_qua;
+                const correct = pred.pred === actual;
+                updateRecentPreds(pred.pred, actual);
+                if (!predLog.some(p => p.phien === missed.Phien)) {
+                  predLog.unshift({
+                    phien: missed.Phien,
+                    du_doan: pred.pred,
+                    ket_qua: actual,
+                    dung: correct,
+                    algo: pred.algo,
+                    conf: pred.conf,
+                    ly_giai: pred.ly_giai || '',
+                    phan_tich: pred.detail || null,
+                    xuc_xac: missed.Xuc_xac_1+'-'+missed.Xuc_xac_2+'-'+missed.Xuc_xac_3,
+                    tong: missed.Tong,
+                    time: new Date().toISOString(),
+                    recovered: true
+                  });
+                  console.log('[RECOVER] Phien '+missed.Phien+': du_doan='+pred.pred+' thuc_te='+actual+' => '+(correct?'DUNG':'SAI'));
+                }
+              }
+              if (predLog.length > MAX_PRED_LOG) predLog = predLog.slice(0, MAX_PRED_LOG);
+            }
+          }
+          // Cap nhat lastKnownPhien
+          if (lichSu.length > 0) lastKnownPhien = lichSu[0].Phien;
 
           // Backfill predLog tu lich su co san
           // Sap xep cu -> moi de chay sliding window
@@ -326,6 +369,7 @@ function connectWebSocket() {
         const result = total > 10 ? 'Tai' : 'Xiu';
         const entry = { Phien:currentSessionId, Xuc_xac_1:d1, Xuc_xac_2:d2, Xuc_xac_3:d3, Tong:total, Ket_qua:result, id:'@tiendataox' };
         latestSession = entry;
+        lastKnownPhien = entry.Phien;
         if (!lichSu.some(x => x.Phien === entry.Phien)) {
           // Neu co pending prediction => ghi ket qua dung/sai
           if (pendingPred && lichSu.length >= WINDOW) {
@@ -369,9 +413,9 @@ function connectWebSocket() {
     } catch(e) { console.error('[ERR] '+e.message); }
   });
   ws.on('close', (code) => {
-    console.log('[CLOSE] Code: '+code);
+    console.log('[CLOSE] Code: '+code+' | Se reconnect sau 1.5s...');
     clearInterval(pingInterval); clearTimeout(reconnectTimeout);
-    reconnectTimeout = setTimeout(connectWebSocket, RECONNECT_DELAY);
+    reconnectTimeout = setTimeout(connectWebSocket, 1500); // Giam tu 2500 xuong 1500ms
   });
   ws.on('error', (err) => { console.error('[ERR] '+err.message); try{ws.close();}catch(e){} });
 }
