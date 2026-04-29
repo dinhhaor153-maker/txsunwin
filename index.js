@@ -213,7 +213,7 @@ function runPredict(w, recentTotals, recentPredResults) {
 // ============================================================
 const SEARCH_TARGET_MAX_SAI = 2;
 const SEARCH_TEST_WINDOW    = 1000;
-const SEARCH_MIN_PHIEN      = 150;
+const SEARCH_MIN_PHIEN      = 80;
 const SEARCH_INTERVAL_PHIEN = 30;
 
 let autoSearchState = {
